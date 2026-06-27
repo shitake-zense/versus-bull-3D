@@ -80,6 +80,19 @@ export function useFirebaseRoom(
 
   const dbRoom = useCallback(() => ref(getDb(), `rooms/${roomId}`), [roomId]);
 
+  // ルームごとに uid を localStorage で永続化。リロード/再接続時に同じスロットを取り戻せる。
+  useEffect(() => {
+    if (!roomId) return;
+    const key = `vsb3_uid_${roomId}`;
+    try {
+      const stored = localStorage.getItem(key);
+      if (stored) uidRef.current = stored;
+      else localStorage.setItem(key, uidRef.current);
+    } catch {
+      /* localStorage 不可（プライベートモード等）なら都度生成の uid を使う */
+    }
+  }, [roomId]);
+
   // サーバー時刻オフセット購読
   useEffect(() => {
     if (!roomId) return;
@@ -205,7 +218,9 @@ export function useFirebaseRoom(
       const win = checkWinAt(board, cell, role);
       const piecesLeft = { ...cur.piecesLeft, [role]: cur.piecesLeft[role] - 1 };
 
-      let winner: Winner = cur.winner;
+      // RTDB は null を書かないため、読み戻すと winner が undefined になる。
+      // update() は undefined を拒否するので null に正規化する。
+      let winner: Winner = cur.winner ?? null;
       if (win) winner = role;
       else if (piecesLeft.o <= 0 && piecesLeft.x <= 0) winner = 'draw';
 
@@ -215,7 +230,7 @@ export function useFirebaseRoom(
         [`piecesLeft/${role}`]: piecesLeft[role],
         currentTurn: winner ? role : oppositeOf(role),
         turnStartedAt: serverTimestamp(),
-        winner,
+        winner: winner ?? null,
         status: winner ? 'finished' : 'playing',
       };
       void update(dbRoom(), updates);
