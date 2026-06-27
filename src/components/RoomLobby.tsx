@@ -21,6 +21,7 @@ interface RoomLobbyProps {
   onAI: (side: Player) => void;
   onCreateRoom: () => void;
   waiting: WaitingState | null;
+  onStartGame: () => void;
   onLeave: () => void;
 }
 
@@ -31,6 +32,7 @@ export function RoomLobby({
   onAI,
   onCreateRoom,
   waiting,
+  onStartGame,
   onLeave,
 }: RoomLobbyProps) {
   const [aiSide, setAiSide] = useState<Player>('o');
@@ -49,9 +51,12 @@ export function RoomLobby({
 
   if (waiting) {
     const bothJoined = Boolean(waiting.room?.players.o && waiting.room?.players.x);
+    const isHost = waiting.myRole === 'o';
     return (
       <Shell>
-        <h2 className="font-display text-2xl text-white">対戦相手を待っています</h2>
+        <h2 className="font-display text-2xl text-white">
+          {bothJoined ? '対戦ロビー' : '対戦相手を待っています'}
+        </h2>
         <p className="text-sm text-col-ui">
           ルームID: <span className="font-mono text-white">{waiting.roomId}</span>
         </p>
@@ -80,9 +85,26 @@ export function RoomLobby({
           <SlotCard label="XENOGENESIS（X・黒・後攻）" name={waiting.room?.players.x?.name} ready={!!waiting.room?.players.x} />
         </div>
 
-        <p className="text-sm text-col-ui">
-          {bothJoined ? 'まもなく開始します…' : '相手がリンクを開くと自動的に始まります。'}
-        </p>
+        {/* ルーム設定（今後拡張予定のプレースホルダ） */}
+        <div className="w-full rounded-lg border border-dashed border-col-border bg-bg-void/40 px-3 py-2 text-xs text-col-ui">
+          ルール: 4×4 立体・タテヨコナナメ4連 / 持ち時間 5分＋15秒
+          <span className="ml-1 opacity-60">（設定変更は今後追加予定）</span>
+        </div>
+
+        {bothJoined ? (
+          isHost ? (
+            <button
+              onClick={onStartGame}
+              className="w-full rounded-lg border border-col-gold/60 bg-bg-surface py-3 font-display text-lg text-white transition-colors hover:bg-col-gold/10"
+            >
+              対戦開始
+            </button>
+          ) : (
+            <p className="animate-blink text-sm text-col-ui">ホストの開始を待っています…</p>
+          )
+        ) : (
+          <p className="text-sm text-col-ui">相手がリンクを開くと、ここに表示されます。</p>
+        )}
         {waiting.error && <p className="text-sm text-[#E84040]">{waiting.error}</p>}
 
         <button onClick={onLeave} className="text-xs text-col-ui underline hover:text-white">

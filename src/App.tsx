@@ -337,6 +337,7 @@ export default function App() {
           onAI={beginAI}
           onCreateRoom={createRoom}
           waiting={waiting}
+          onStartGame={fb.startGame}
           onLeave={exitToMenu}
         />
       )}

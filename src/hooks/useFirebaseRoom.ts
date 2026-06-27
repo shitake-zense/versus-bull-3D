@@ -56,6 +56,8 @@ export interface UseFirebaseRoomResult {
   createRoom: () => Promise<void>;
   /** 既存ルームに参加（空きスロットを取得） */
   joinRoom: () => Promise<void>;
+  /** ロビーから対戦開始（ホストのみ） */
+  startGame: () => void;
   place: (cell: number) => void;
   reportTimeout: (player: Player) => void;
   requestRematch: () => void;
@@ -80,16 +82,18 @@ export function useFirebaseRoom(
 
   const dbRoom = useCallback(() => ref(getDb(), `rooms/${roomId}`), [roomId]);
 
-  // ルームごとに uid を localStorage で永続化。リロード/再接続時に同じスロットを取り戻せる。
+  // ルームごとに uid を sessionStorage で永続化。
+  // sessionStorage はリロードでは残り（=同タブのリロード/再接続で同じスロットを取り戻せる）、
+  // タブ/端末ごとに独立（=同一ブラウザの別タブや別端末は別プレイヤーになる）。
   useEffect(() => {
     if (!roomId) return;
     const key = `vsb3_uid_${roomId}`;
     try {
-      const stored = localStorage.getItem(key);
+      const stored = sessionStorage.getItem(key);
       if (stored) uidRef.current = stored;
-      else localStorage.setItem(key, uidRef.current);
+      else sessionStorage.setItem(key, uidRef.current);
     } catch {
-      /* localStorage 不可（プライベートモード等）なら都度生成の uid を使う */
+      /* sessionStorage 不可（プライベートモード等）なら都度生成の uid を使う */
     }
   }, [roomId]);
 
@@ -111,22 +115,31 @@ export function useFirebaseRoom(
     return () => unsub();
   }, [roomId, dbRoom]);
 
-  // 自分のスロット(uid)から myRole を確定し、切断ハンドラを登録
+  // 自分のスロット(uid)から myRole を確定する。
   useEffect(() => {
     if (!roomId || !room) return;
     let role: Player | null = null;
     (['o', 'x'] as Player[]).forEach((p) => {
       if (room.players[p]?.uid === uidRef.current) role = p;
     });
-    if (role && role !== myRoleRef.current) {
-      setMyRole(role);
-      const slotRef = ref(getDb(), `rooms/${roomId}/players/${role}`);
-      // 切断時に connected=false。スロット自体は残して再戦を可能にする。
-      onDisconnect(ref(getDb(), `rooms/${roomId}/players/${role}/connected`)).set(false);
-      // 再接続時は connected=true に戻す。
-      void update(slotRef, { connected: true });
-    }
+    if (role && role !== myRoleRef.current) setMyRole(role);
   }, [roomId, room]);
+
+  // プレゼンス管理: .info/connected を監視し、接続が確立するたびに
+  // connected=true を書き、onDisconnect(connected=false) を再設定する。
+  // これによりモバイル等で一時的に切断→再接続しても「切断」表示が残らない。
+  useEffect(() => {
+    if (!roomId || !myRole) return;
+    const connectedRef = ref(getDb(), '.info/connected');
+    const slotConnRef = ref(getDb(), `rooms/${roomId}/players/${myRole}/connected`);
+    const unsub = onValue(connectedRef, (snap) => {
+      if (snap.val() !== true) return; // 切断中。再接続時に再びここへ来る。
+      // 切断時に connected=false（スロット自体は残し再接続/再戦を可能に）。
+      void onDisconnect(slotConnRef).set(false);
+      void set(slotConnRef, true);
+    });
+    return () => unsub();
+  }, [roomId, myRole]);
 
   const createRoom = useCallback(async () => {
     if (!roomId) return;
@@ -171,9 +184,7 @@ export function useFirebaseRoom(
           uid: uidRef.current,
         };
         data.players = players;
-        if (players.o && players.x && data.status === 'waiting') {
-          data.status = 'countdown';
-        }
+        // 2人揃っても自動開始せず 'waiting'(ロビー) のまま。ホストの開始操作を待つ。
         return data;
       });
       if (!result.committed) {
@@ -199,6 +210,15 @@ export function useFirebaseRoom(
     }, COUNTDOWN_MS);
     return () => clearTimeout(t);
   }, [roomId, room, myRole, dbRoom]);
+
+  // ロビーから対戦開始（ホストが押す）。countdown にすると上の effect が playing へ遷移。
+  const startGame = useCallback(() => {
+    const cur = roomRef.current;
+    if (!roomId || !cur) return;
+    if (!cur.players.o || !cur.players.x) return; // 2人揃うまで開始不可
+    if (cur.status !== 'waiting') return;
+    void update(dbRoom(), { status: 'countdown' });
+  }, [roomId, dbRoom]);
 
   const place = useCallback(
     (cell: number) => {
@@ -281,6 +301,7 @@ export function useFirebaseRoom(
     error,
     createRoom,
     joinRoom,
+    startGame,
     place,
     reportTimeout,
     requestRematch,
