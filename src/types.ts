@@ -1,0 +1,74 @@
+// vsb3 共通型定義
+// プレイヤー: o(マル・白・先攻) / x(バツ・黒・後攻)。Firebase キーもこの語に統一する。
+
+export type Player = 'o' | 'x';
+
+/** 1マスのスタック。配列の先頭が最下層、末尾が最上層。 */
+export type Cell = Player[];
+
+/** 盤面。length 16（4×4）。index = row * 4 + col。 */
+export type Board = Cell[];
+
+export type GameMode = 'online' | 'local' | 'ai';
+
+export type RoomStatus = 'waiting' | 'countdown' | 'playing' | 'finished';
+
+export type Winner =
+  | null
+  | 'o'
+  | 'x'
+  | 'draw'
+  | 'timeout_o'
+  | 'timeout_x';
+
+/** 勝利を構成する1ピースの3D位置 */
+export interface WinCoord {
+  /** cellIndex（0-15） */
+  cell: number;
+  /** 高さ層（0 = 最下層） */
+  layer: number;
+}
+
+/** 勝利ライン（3D空間の4連）。横・縦・斜め・階段状すべてを表現できる。 */
+export interface WinLine {
+  /** 構成する4ピースの座標 */
+  coords: WinCoord[];
+  player: Player;
+}
+
+/** 純粋なゲーム状態（描画・ロジック共通のスナップショット） */
+export interface GameState {
+  board: Board;
+  currentTurn: Player;
+  piecesLeft: Record<Player, number>;
+  winner: Winner;
+  winLine: WinLine | null;
+}
+
+/** Firebase /rooms/{roomId} のスキーマ */
+export interface RoomData {
+  status: RoomStatus;
+  players: {
+    o: PlayerSlot | null;
+    x: PlayerSlot | null;
+  };
+  /** { [cellIndex]: Player[] }。空マスはキー自体が無い場合がある。 */
+  board: Record<string, Player[]> | null;
+  currentTurn: Player;
+  /** 現在の手番が始まったサーバー時刻(ms)。タイマー計算の基準。 */
+  turnStartedAt: number;
+  piecesLeft: { o: number; x: number };
+  winner: Winner;
+  createdAt: number;
+  /** 再戦リクエスト（両者 true で新ゲーム開始） */
+  rematch?: { o?: boolean; x?: boolean };
+}
+
+export interface PlayerSlot {
+  name: string;
+  connected: boolean;
+  /** 残り持ち時間(ms) */
+  timeRemaining: number;
+  /** セッション固有ID（自分のスロット特定用） */
+  uid?: string;
+}
