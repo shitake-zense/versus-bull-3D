@@ -79,20 +79,25 @@ npm run dev
 
 ## GitHub Pages へデプロイ
 
-1. `package.json` の `homepage` と `vite.config.ts` の `base` を、自分の公開URLに合わせる
-   （例: ユーザー名 `alice` でリポジトリ名 `vsb3` なら、`base: '/vsb3/'`、`homepage: 'https://alice.github.io/vsb3/'`）
-2. リポジトリを GitHub に push
-3. 1コマンドでデプロイ:
+配信先リポジトリ: <https://github.com/shitake-zense/versus-bull-3D>
+（`vite.config.ts` の `base` と `package.json` の `homepage` はこのリポジトリ用に設定済み）
 
 ```bash
+# 1. まだ push していなければ main を push
+git push -u origin main
+
+# 2. 本番ビルド + gh-pages ブランチへ公開（1コマンド）
 npm run deploy
 ```
 
 `predeploy` で本番ビルドが走り、`gh-pages` ブランチへ `dist/` が公開されます。
-GitHub の **Settings → Pages** で、Source が `gh-pages` ブランチになっていることを確認してください。
+初回のみ GitHub の **Settings → Pages** で Source が `gh-pages` ブランチ（`/root`）になっていることを確認してください。
 
-公開後、トップで「オンライン対戦」→ ルーム作成すると招待リンクが自動でクリップボードにコピーされます。
-そのリンク（`https://<user>.github.io/vsb3/?room=<roomId>`）を友人に送ると、相手がアクセスした時点で対戦が始まります。
+公開URL: <https://shitake-zense.github.io/versus-bull-3D/>
+
+トップで「オンライン対戦」→ ルーム作成すると招待リンクが自動でクリップボードにコピーされます。
+そのリンク（`https://shitake-zense.github.io/versus-bull-3D/?room=<roomId>`）を友人に送ると、相手がアクセスした時点で対戦が始まります。
+※ オンライン対戦には別途 Firebase の設定（`.env`）が必要です（上記「セットアップ」参照）。
 
 ---
 
