@@ -3,7 +3,7 @@
 // これにより「相手のオープン3を防ぐ」「自分のフォークを作る」といった立体的な手筋を理解する。
 // 時間予算内で到達できる最大深さまで反復深化し、1手の思考時間が暴れないようにする。
 
-import type { Board, Player } from '../types';
+import type { AiLevel, Board, Player } from '../types';
 import {
   BOARD_DIM,
   DIRECTIONS,
@@ -14,9 +14,26 @@ import {
   oppositeOf,
 } from './gameLogic';
 
-const TIME_BUDGET_MS = 350; // 1手あたりの思考時間の上限（UIフリーズ防止）
-const MAX_DEPTH = 6; // 時間が余れば深掘りする上限
 const WIN_SCORE = 1_000_000;
+
+/**
+ * 難易度設定。
+ * - timeBudgetMs / maxDepth: 反復深化が到達できる読みの深さ（強さの主因）。
+ * - blunderRate: その確率でランダムな合法手を選ぶ（＝勝ちや受けを見逃す「ミス率」）。
+ * blunder は即勝ち判定より前に評価するので、easy は必勝手すら見逃すことがある。
+ */
+interface LevelConfig {
+  timeBudgetMs: number;
+  maxDepth: number;
+  blunderRate: number;
+}
+
+const LEVELS: Record<AiLevel, LevelConfig> = {
+  easy: { timeBudgetMs: 60, maxDepth: 2, blunderRate: 0.45 },
+  normal: { timeBudgetMs: 200, maxDepth: 4, blunderRate: 0.12 },
+  hard: { timeBudgetMs: 350, maxDepth: 6, blunderRate: 0 },
+  max: { timeBudgetMs: 800, maxDepth: 8, blunderRate: 0 },
+};
 
 // ライン上に揃った枚数ごとの価値。
 const LINE_VALUE = [0, 1, 14, 90, WIN_SCORE];
@@ -44,9 +61,16 @@ export function getBestMove(
   board: Board,
   piecesLeft: Record<Player, number>,
   aiPlayer: Player,
+  level: AiLevel = 'hard',
 ): number | null {
+  const cfg = LEVELS[level];
   const rootMoves = orderedMoves(board, legalMoves(piecesLeft[aiPlayer]));
   if (rootMoves.length === 0) return null;
+
+  // ミス率: 一定確率でランダムな合法手を選ぶ（即勝ち判定より前なので必勝も見逃しうる）。
+  if (cfg.blunderRate > 0 && Math.random() < cfg.blunderRate) {
+    return rootMoves[Math.floor(Math.random() * rootMoves.length)];
+  }
 
   // 即勝ちがあれば探索せず即採用。
   for (const m of rootMoves) {
@@ -54,11 +78,11 @@ export function getBestMove(
   }
 
   const ctx: SearchCtx = { ai: aiPlayer };
-  deadline = performance.now() + TIME_BUDGET_MS;
+  deadline = performance.now() + cfg.timeBudgetMs;
   nodeCounter = 0;
   let bestMove = rootMoves[0];
 
-  for (let depth = 2; depth <= MAX_DEPTH; depth++) {
+  for (let depth = 2; depth <= cfg.maxDepth; depth++) {
     try {
       const result = rootSearch(board, piecesLeft, aiPlayer, depth, bestMove, ctx);
       bestMove = result.move; // この深さは最後まで完了した

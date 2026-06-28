@@ -11,6 +11,9 @@ export type Board = Cell[];
 
 export type GameMode = 'online' | 'local' | 'ai';
 
+/** AI の強さ。easy=接待〜max=全力。useGameLogic / ai.ts で参照。 */
+export type AiLevel = 'easy' | 'normal' | 'hard' | 'max';
+
 export type RoomStatus = 'waiting' | 'countdown' | 'playing' | 'finished';
 
 export type Winner =

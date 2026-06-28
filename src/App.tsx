@@ -1,10 +1,10 @@
 // 画面遷移と各モードの統合。menu ↔ game を切り替え、ローカル/AI と オンライン の状態源を束ねる。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { GameMode, Player, Winner } from './types';
+import type { AiLevel, GameMode, Player, Winner } from './types';
 import { START_TIME_MS, recordToBoard, scanWin } from './lib/gameLogic';
 import { generateRoomId } from './lib/roomId';
-import { TEAM } from './lib/teams';
+import { AI_LEVEL_LABEL, TEAM } from './lib/teams';
 import { useGameLogic } from './hooks/useGameLogic';
 import { useFirebaseRoom } from './hooks/useFirebaseRoom';
 import { useFisherClock } from './hooks/useFisherClock';
@@ -22,6 +22,7 @@ export default function App() {
   const [mode, setMode] = useState<GameMode | null>(null);
   const [playerName, setPlayerName] = useState('');
   const [aiPlayer, setAiPlayer] = useState<Player>('x');
+  const [aiLevel, setAiLevel] = useState<AiLevel>('normal');
 
   const [roomId, setRoomId] = useState<string | null>(null);
   const [intent, setIntent] = useState<Intent>(null);
@@ -31,7 +32,7 @@ export default function App() {
   const [countdown, setCountdown] = useState<number | null>(null);
   const [offlineCountingDown, setOfflineCountingDown] = useState(false);
 
-  const offline = useGameLogic({ mode: mode ?? 'local', aiPlayer });
+  const offline = useGameLogic({ mode: mode ?? 'local', aiPlayer, aiLevel });
   const fb = useFirebaseRoom(mode === 'online' ? roomId : null, playerName);
 
   const isOnline = mode === 'online';
@@ -221,8 +222,9 @@ export default function App() {
   }, [startOfflineRound]);
 
   const beginAI = useCallback(
-    (humanSide: Player) => {
+    (humanSide: Player, level: AiLevel) => {
       setAiPlayer(humanSide === 'o' ? 'x' : 'o');
+      setAiLevel(level);
       setMode('ai');
       setRoomId(null);
       requestAnimationFrame(startOfflineRound);
@@ -297,11 +299,11 @@ export default function App() {
       const ai = offline.aiPlayer;
       const human = offline.humanPlayer;
       const youName = playerName || TEAM[human].name;
-      const cpuName = `${TEAM[ai].name}（CPU）`;
+      const cpuName = `${TEAM[ai].name}（CPU・${AI_LEVEL_LABEL[aiLevel]}）`;
       return human === 'o' ? { o: youName, x: cpuName } : { o: cpuName, x: youName };
     }
     return { o: TEAM.o.name, x: TEAM.x.name };
-  }, [isOnline, room?.players, mode, playerName, offline.humanPlayer, offline.aiPlayer]);
+  }, [isOnline, room?.players, mode, playerName, aiLevel, offline.humanPlayer, offline.aiPlayer]);
 
   const canPlace = isOnline ? running && fb.myRole === activePlayer : offline.canHumanPlace;
 

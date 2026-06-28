@@ -1,8 +1,9 @@
 // モード選択と、オンライン対戦の待機ロビー。
 
 import { useEffect, useRef, useState } from 'react';
-import type { Player, RoomData } from '../types';
+import type { AiLevel, Player, RoomData } from '../types';
 import { isFirebaseConfigured } from '../lib/firebase';
+import { AI_LEVEL_LABEL } from '../lib/teams';
 
 export interface WaitingState {
   roomId: string;
@@ -20,7 +21,7 @@ interface RoomLobbyProps {
   /** ロビーでの名前変更（オンラインは自分のスロットへ即時反映） */
   onChangeName: (n: string) => void;
   onLocal: () => void;
-  onAI: (side: Player) => void;
+  onAI: (side: Player, level: AiLevel) => void;
   onCreateRoom: () => void;
   waiting: WaitingState | null;
   onStartGame: () => void;
@@ -39,6 +40,7 @@ export function RoomLobby({
   onLeave,
 }: RoomLobbyProps) {
   const [aiSide, setAiSide] = useState<Player>('o');
+  const [aiLevel, setAiLevel] = useState<AiLevel>('normal');
   const [copied, setCopied] = useState(false);
 
   // 待機ロビーでの自分の表示名。Firebase 上のスロット名から一度だけ初期化する。
@@ -212,11 +214,28 @@ export function RoomLobby({
               ))}
             </div>
           </div>
+
+          {/* 難易度選択 */}
+          <div className="mt-3">
+            <div className="mb-1 text-[10px] uppercase tracking-wider text-col-ui">難易度</div>
+            <div className="grid grid-cols-4 overflow-hidden rounded-md border border-col-border text-xs">
+              {(['easy', 'normal', 'hard', 'max'] as AiLevel[]).map((lv) => (
+                <button
+                  key={lv}
+                  onClick={() => setAiLevel(lv)}
+                  className={`py-1.5 ${aiLevel === lv ? 'bg-col-gold/20 text-white' : 'text-col-ui'}`}
+                >
+                  {AI_LEVEL_LABEL[lv]}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <button
-            onClick={() => onAI(aiSide)}
+            onClick={() => onAI(aiSide, aiLevel)}
             className="mt-3 w-full rounded-md border border-col-gold/50 bg-bg-void py-2 text-sm text-white hover:bg-col-gold/10"
           >
-            {aiSide === 'o' ? 'ORIGIN（先攻・白）' : 'XENOGENESIS（後攻・黒）'}で参戦
+            {aiSide === 'o' ? 'ORIGIN（先攻・白）' : 'XENOGENESIS（後攻・黒）'}・{AI_LEVEL_LABEL[aiLevel]}で参戦
           </button>
         </div>
       </div>

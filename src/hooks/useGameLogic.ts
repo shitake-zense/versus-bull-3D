@@ -2,7 +2,7 @@
 // （オンラインは useFirebaseRoom が状態源になるため、このフックは使わない。）
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { GameMode, Player, Winner, WinLine, Board } from '../types';
+import type { AiLevel, GameMode, Player, Winner, WinLine, Board } from '../types';
 import {
   INCREMENT_MS,
   INITIAL_PIECES,
@@ -30,6 +30,8 @@ export interface UseGameLogicOptions {
   mode: GameMode; // 'local' | 'ai'（'online' では使用しない）
   /** AIモードでAIが操作する側 */
   aiPlayer?: Player;
+  /** AIの強さ */
+  aiLevel?: AiLevel;
   onPlace?: () => void;
   onWin?: (winner: Winner) => void;
 }
@@ -46,7 +48,7 @@ function freshState(running: boolean): LocalState {
   };
 }
 
-export function useGameLogic({ mode, aiPlayer = 'x', onPlace, onWin }: UseGameLogicOptions) {
+export function useGameLogic({ mode, aiPlayer = 'x', aiLevel = 'hard', onPlace, onWin }: UseGameLogicOptions) {
   const [s, setS] = useState<LocalState>(() => freshState(false));
   const [running, setRunning] = useState(false);
   const [score, setScore] = useState<Record<Player, number>>({ o: 0, x: 0 });
@@ -147,11 +149,11 @@ export function useGameLogic({ mode, aiPlayer = 'x', onPlace, onWin }: UseGameLo
     const t = setTimeout(() => {
       const cur = sRef.current;
       if (cur.winner || cur.currentTurn !== aiPlayer) return;
-      const move = getBestMove(cur.board, cur.piecesLeft, aiPlayer);
+      const move = getBestMove(cur.board, cur.piecesLeft, aiPlayer, aiLevel);
       if (move !== null) place(move);
     }, delay);
     return () => clearTimeout(t);
-  }, [mode, running, s.currentTurn, s.winner, s.turnStartedAt, aiPlayer, place]);
+  }, [mode, running, s.currentTurn, s.winner, s.turnStartedAt, aiPlayer, aiLevel, place]);
 
   const canHumanPlace = useMemo(
     () => running && !s.winner && (mode === 'local' || s.currentTurn === humanPlayer),
