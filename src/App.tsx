@@ -1,8 +1,9 @@
 // 画面遷移と各モードの統合。menu ↔ game を切り替え、ローカル/AI と オンライン の状態源を束ねる。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { AiLevel, GameMode, Player, Winner } from './types';
-import { START_TIME_MS, recordToBoard, scanWin } from './lib/gameLogic';
+import type { AiLevel, GameMode, Player, TimeControl, Winner } from './types';
+import { recordToBoard, scanWin } from './lib/gameLogic';
+import { DEFAULT_TIME_CONTROL, isUnlimited, normalizeTimeControl } from './lib/timeControl';
 import { generateRoomId } from './lib/roomId';
 import { AI_LEVEL_LABEL, TEAM } from './lib/teams';
 import { useGameLogic } from './hooks/useGameLogic';
@@ -23,6 +24,7 @@ export default function App() {
   const [playerName, setPlayerName] = useState('');
   const [aiPlayer, setAiPlayer] = useState<Player>('x');
   const [aiLevel, setAiLevel] = useState<AiLevel>('normal');
+  const [timeControl, setTimeControl] = useState<TimeControl>(DEFAULT_TIME_CONTROL);
 
   const [roomId, setRoomId] = useState<string | null>(null);
   const [intent, setIntent] = useState<Intent>(null);
@@ -32,7 +34,7 @@ export default function App() {
   const [countdown, setCountdown] = useState<number | null>(null);
   const [offlineCountingDown, setOfflineCountingDown] = useState(false);
 
-  const offline = useGameLogic({ mode: mode ?? 'local', aiPlayer, aiLevel });
+  const offline = useGameLogic({ mode: mode ?? 'local', aiPlayer, aiLevel, timeControl });
   const fb = useFirebaseRoom(mode === 'online' ? roomId : null, playerName);
 
   const isOnline = mode === 'online';
@@ -53,10 +55,10 @@ export default function App() {
   // ---- create / join の実行 ----
   useEffect(() => {
     if (!isOnline || !roomId || !intent) return;
-    if (intent === 'create') void fb.createRoom();
+    if (intent === 'create') void fb.createRoom(timeControl, 'o');
     else void fb.joinRoom();
     setIntent(null);
-  }, [isOnline, roomId, intent, fb]);
+  }, [isOnline, roomId, intent, fb, timeControl]);
 
   // ---- 派生状態（モード非依存ビュー） ----
   const status = isOnline
@@ -90,10 +92,17 @@ export default function App() {
     ? room?.piecesLeft ?? { o: 32, x: 32 }
     : offline.state.piecesLeft;
 
+  // 有効な持ち時間設定（オンラインはルーム値、ローカル/AI は App 状態）。
+  const activeTimeControl = useMemo(
+    () => (isOnline ? normalizeTimeControl(room?.timeControl) : timeControl),
+    [isOnline, room?.timeControl, timeControl],
+  );
+  const timed = !isUnlimited(activeTimeControl);
+
   const baseRemaining = isOnline
     ? {
-        o: room?.players.o?.timeRemaining ?? START_TIME_MS,
-        x: room?.players.x?.timeRemaining ?? START_TIME_MS,
+        o: room?.players.o?.timeRemaining ?? activeTimeControl.baseMs,
+        x: room?.players.x?.timeRemaining ?? activeTimeControl.baseMs,
       }
     : offline.state.remaining;
 
@@ -110,6 +119,7 @@ export default function App() {
 
   const displayRemaining = useFisherClock({
     running,
+    timed,
     activePlayer,
     baseRemaining,
     turnStartedAt,
@@ -343,6 +353,7 @@ export default function App() {
           status={status}
           names={names}
           displayRemaining={displayRemaining}
+          timed={timed}
           currentTurn={activePlayer}
           piecesLeft={piecesLeft}
           score={isOnline ? onlineScore : offline.score}
@@ -362,6 +373,9 @@ export default function App() {
           playerName={playerName}
           setPlayerName={setPlayerName}
           onChangeName={handleChangeName}
+          timeControl={timeControl}
+          setTimeControl={setTimeControl}
+          onChangeSettings={fb.updateSettings}
           onLocal={beginLocal}
           onAI={beginAI}
           onCreateRoom={createRoom}

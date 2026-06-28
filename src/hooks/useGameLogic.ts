@@ -2,17 +2,16 @@
 // （オンラインは useFirebaseRoom が状態源になるため、このフックは使わない。）
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { AiLevel, GameMode, Player, Winner, WinLine, Board } from '../types';
+import type { AiLevel, GameMode, Player, TimeControl, Winner, WinLine, Board } from '../types';
 import {
-  INCREMENT_MS,
   INITIAL_PIECES,
-  START_TIME_MS,
   FIRST_PLAYER,
   applyMove,
   checkWinAt,
   createEmptyBoard,
   oppositeOf,
 } from '../lib/gameLogic';
+import { DEFAULT_TIME_CONTROL, isUnlimited } from '../lib/timeControl';
 import { getBestMove } from '../lib/ai';
 
 interface LocalState {
@@ -32,24 +31,35 @@ export interface UseGameLogicOptions {
   aiPlayer?: Player;
   /** AIの強さ */
   aiLevel?: AiLevel;
+  /** 持ち時間設定 */
+  timeControl?: TimeControl;
   onPlace?: () => void;
   onWin?: (winner: Winner) => void;
 }
 
-function freshState(running: boolean): LocalState {
+function freshState(running: boolean, tc: TimeControl): LocalState {
   return {
     board: createEmptyBoard(),
     currentTurn: FIRST_PLAYER,
     piecesLeft: { o: INITIAL_PIECES, x: INITIAL_PIECES },
     winner: null,
     winLine: null,
-    remaining: { o: START_TIME_MS, x: START_TIME_MS },
+    remaining: { o: tc.baseMs, x: tc.baseMs },
     turnStartedAt: running ? Date.now() : 0,
   };
 }
 
-export function useGameLogic({ mode, aiPlayer = 'x', aiLevel = 'hard', onPlace, onWin }: UseGameLogicOptions) {
-  const [s, setS] = useState<LocalState>(() => freshState(false));
+export function useGameLogic({
+  mode,
+  aiPlayer = 'x',
+  aiLevel = 'hard',
+  timeControl = DEFAULT_TIME_CONTROL,
+  onPlace,
+  onWin,
+}: UseGameLogicOptions) {
+  const [s, setS] = useState<LocalState>(() => freshState(false, timeControl));
+  const tcRef = useRef(timeControl);
+  tcRef.current = timeControl;
   const [running, setRunning] = useState(false);
   const [score, setScore] = useState<Record<Player, number>>({ o: 0, x: 0 });
 
@@ -87,7 +97,10 @@ export function useGameLogic({ mode, aiPlayer = 'x', aiLevel = 'hard', onPlace, 
 
       const now = Date.now();
       const elapsed = now - prev.turnStartedAt;
-      const moverRemaining = prev.remaining[player] - elapsed + INCREMENT_MS;
+      const tc = tcRef.current;
+      const moverRemaining = isUnlimited(tc)
+        ? prev.remaining[player]
+        : prev.remaining[player] - elapsed + tc.incrementMs;
 
       const board = applyMove(prev.board, cell, player);
       const win = checkWinAt(board, cell, player);
@@ -130,13 +143,13 @@ export function useGameLogic({ mode, aiPlayer = 'x', aiLevel = 'hard', onPlace, 
 
   /** スコア維持で次の対局を準備（running=false のままカウントダウンを挟む） */
   const newRound = useCallback(() => {
-    setS(freshState(false));
+    setS(freshState(false, tcRef.current));
     setRunning(false);
   }, []);
 
   /** スコアも含めて完全初期化（モード選択に戻る時など） */
   const reset = useCallback(() => {
-    setS(freshState(false));
+    setS(freshState(false, tcRef.current));
     setRunning(false);
     setScore({ o: 0, x: 0 });
   }, []);

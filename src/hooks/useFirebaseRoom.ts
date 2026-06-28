@@ -19,14 +19,19 @@ import {
 import { getDb } from '../lib/firebase';
 import {
   INITIAL_PIECES,
-  START_TIME_MS,
   FIRST_PLAYER,
   applyMove,
   checkWinAt,
   recordToBoard,
 } from '../lib/gameLogic';
 import { oppositeOf } from '../lib/gameLogic';
-import type { Player, RoomData, Winner } from '../types';
+import {
+  DEFAULT_TIME_CONTROL,
+  isUnlimited,
+  normalizeTimeControl,
+  resolveStartingPlayer,
+} from '../lib/timeControl';
+import type { Player, RoomData, TimeControl, TurnPref, Winner } from '../types';
 
 const COUNTDOWN_MS = 3000;
 
@@ -44,6 +49,8 @@ function initialRoom(): RoomData {
     piecesLeft: { o: INITIAL_PIECES, x: INITIAL_PIECES },
     winner: null,
     createdAt: Date.now(),
+    timeControl: DEFAULT_TIME_CONTROL,
+    turnPref: 'o',
   };
 }
 
@@ -53,11 +60,13 @@ export interface UseFirebaseRoomResult {
   serverOffset: number;
   error: string | null;
   /** 新規ルームを作成して o として参加 */
-  createRoom: () => Promise<void>;
+  createRoom: (timeControl?: TimeControl, turnPref?: TurnPref) => Promise<void>;
   /** 既存ルームに参加（空きスロットを取得） */
   joinRoom: () => Promise<void>;
   /** ロビーから対戦開始（ホストのみ） */
   startGame: () => void;
+  /** ルーム設定（持ち時間・先手）を更新（ホストのみ・待機中） */
+  updateSettings: (timeControl: TimeControl, turnPref: TurnPref) => void;
   /** 自分のスロットの表示名を更新（ロビーで参加側も変更可能） */
   updateName: (name: string) => void;
   place: (cell: number) => void;
@@ -143,22 +152,28 @@ export function useFirebaseRoom(
     return () => unsub();
   }, [roomId, myRole]);
 
-  const createRoom = useCallback(async () => {
-    if (!roomId) return;
-    setError(null);
-    const base = initialRoom();
-    base.players.o = {
-      name: playerName || 'O',
-      connected: true,
-      timeRemaining: START_TIME_MS,
-      uid: uidRef.current,
-    };
-    try {
-      await set(dbRoom(), base);
-    } catch (e) {
-      setError(roomWriteError(e));
-    }
-  }, [roomId, playerName, dbRoom]);
+  const createRoom = useCallback(
+    async (timeControl: TimeControl = DEFAULT_TIME_CONTROL, turnPref: TurnPref = 'o') => {
+      if (!roomId) return;
+      setError(null);
+      const tc = normalizeTimeControl(timeControl);
+      const base = initialRoom();
+      base.timeControl = tc;
+      base.turnPref = turnPref;
+      base.players.o = {
+        name: playerName || 'O',
+        connected: true,
+        timeRemaining: tc.baseMs,
+        uid: uidRef.current,
+      };
+      try {
+        await set(dbRoom(), base);
+      } catch (e) {
+        setError(roomWriteError(e));
+      }
+    },
+    [roomId, playerName, dbRoom],
+  );
 
   const joinRoom = useCallback(async () => {
     if (!roomId) return;
@@ -182,7 +197,7 @@ export function useFirebaseRoom(
         players[slot] = {
           name: playerName || (slot === 'o' ? 'O' : 'X'),
           connected: true,
-          timeRemaining: START_TIME_MS,
+          timeRemaining: normalizeTimeControl(data.timeControl).baseMs,
           uid: uidRef.current,
         };
         data.players = players;
@@ -204,10 +219,14 @@ export function useFirebaseRoom(
     const t = setTimeout(() => {
       const cur = roomRef.current;
       if (!cur || cur.status !== 'countdown') return;
+      const tc = normalizeTimeControl(cur.timeControl);
       void update(dbRoom(), {
         status: 'playing',
         turnStartedAt: serverTimestamp(),
-        currentTurn: FIRST_PLAYER,
+        currentTurn: resolveStartingPlayer(cur.turnPref),
+        // 開始時に両者の持ち時間を確定（ロビーで設定変更されていても整合させる）。
+        'players/o/timeRemaining': tc.baseMs,
+        'players/x/timeRemaining': tc.baseMs,
       });
     }, COUNTDOWN_MS);
     return () => clearTimeout(t);
@@ -221,6 +240,25 @@ export function useFirebaseRoom(
     if (cur.status !== 'waiting') return;
     void update(dbRoom(), { status: 'countdown' });
   }, [roomId, dbRoom]);
+
+  // ルーム設定（持ち時間・先手）を更新。ホストのみ・待機中だけ許可。
+  const updateSettings = useCallback(
+    (timeControl: TimeControl, turnPref: TurnPref) => {
+      const cur = roomRef.current;
+      if (!roomId || !cur) return;
+      if (myRoleRef.current !== 'o' || cur.status !== 'waiting') return;
+      const tc = normalizeTimeControl(timeControl);
+      const updates: Record<string, unknown> = {
+        timeControl: tc,
+        turnPref,
+      };
+      // 待機中の両者の表示用持ち時間も即時反映。
+      if (cur.players.o) updates['players/o/timeRemaining'] = tc.baseMs;
+      if (cur.players.x) updates['players/x/timeRemaining'] = tc.baseMs;
+      void update(dbRoom(), updates);
+    },
+    [roomId, dbRoom],
+  );
 
   // 自分のスロットの表示名を更新（ロビー待機中に参加側/ホスト双方が変更可能）。
   const updateName = useCallback(
@@ -245,7 +283,10 @@ export function useFirebaseRoom(
       const elapsed = Math.max(0, now - cur.turnStartedAt);
       const slot = cur.players[role];
       if (!slot) return;
-      const moverRemaining = slot.timeRemaining - elapsed + 15_000;
+      const tc = normalizeTimeControl(cur.timeControl);
+      const moverRemaining = isUnlimited(tc)
+        ? slot.timeRemaining
+        : slot.timeRemaining - elapsed + tc.incrementMs;
 
       const board = applyMove(recordToBoard(cur.board), cell, role);
       const win = checkWinAt(board, cell, role);
@@ -293,6 +334,7 @@ export function useFirebaseRoom(
       data.rematch = rematch;
       // 両者が再戦を希望したら盤面をリセットして countdown へ。
       if (rematch.o && rematch.x) {
+        const tc = normalizeTimeControl(data.timeControl);
         data.board = null;
         data.piecesLeft = { o: INITIAL_PIECES, x: INITIAL_PIECES };
         data.winner = null;
@@ -300,8 +342,8 @@ export function useFirebaseRoom(
         data.turnStartedAt = 0;
         data.status = 'countdown';
         data.rematch = {};
-        if (data.players.o) data.players.o.timeRemaining = START_TIME_MS;
-        if (data.players.x) data.players.x.timeRemaining = START_TIME_MS;
+        if (data.players.o) data.players.o.timeRemaining = tc.baseMs;
+        if (data.players.x) data.players.x.timeRemaining = tc.baseMs;
       }
       return data;
     });
@@ -315,6 +357,7 @@ export function useFirebaseRoom(
     createRoom,
     joinRoom,
     startGame,
+    updateSettings,
     updateName,
     place,
     reportTimeout,

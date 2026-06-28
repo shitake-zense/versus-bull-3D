@@ -8,6 +8,8 @@ import type { Player } from '../types';
 export interface FisherClockParams {
   /** タイマーを進めるか（playing 中のみ true） */
   running: boolean;
+  /** 持ち時間制か。false（無制限）なら減算もタイムアウトもしない */
+  timed?: boolean;
   /** 現在の手番 */
   activePlayer: Player;
   /** 各プレイヤーの「手番開始時点での残り時間(ms)」スナップショット */
@@ -22,6 +24,7 @@ export interface FisherClockParams {
 
 export function useFisherClock({
   running,
+  timed = true,
   activePlayer,
   baseRemaining,
   turnStartedAt,
@@ -47,7 +50,7 @@ export function useFisherClock({
         o: baseRemaining.o,
         x: baseRemaining.x,
       };
-      if (running) {
+      if (running && timed) {
         next[activePlayer] = baseRemaining[activePlayer] - elapsed;
         if (next[activePlayer] <= 0 && !firedRef.current) {
           firedRef.current = true;
@@ -60,7 +63,7 @@ export function useFisherClock({
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [running, activePlayer, baseRemaining, turnStartedAt, serverOffset]);
+  }, [running, timed, activePlayer, baseRemaining, turnStartedAt, serverOffset]);
 
   return display;
 }

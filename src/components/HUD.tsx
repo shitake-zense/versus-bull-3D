@@ -13,6 +13,7 @@ interface HUDProps {
   status: RoomStatus;
   names: Record<Player, string>;
   displayRemaining: Record<Player, number>;
+  timed: boolean;
   currentTurn: Player;
   piecesLeft: Record<Player, number>;
   score: Record<Player, number>;
@@ -49,6 +50,7 @@ export function HUD(props: HUDProps) {
     status,
     names,
     displayRemaining,
+    timed,
     currentTurn,
     piecesLeft,
     score,
@@ -79,6 +81,7 @@ export function HUD(props: HUDProps) {
           label={`${names.o}${myRole === 'o' ? '（あなた）' : ''}`}
           player="o"
           active={playing && currentTurn === 'o'}
+          timed={timed}
         />
         <div className="mt-1 shrink-0 px-1 text-center font-display">
           <div className="hidden text-[10px] uppercase tracking-[0.3em] text-col-ui sm:block">
@@ -95,6 +98,7 @@ export function HUD(props: HUDProps) {
           label={`${names.x}${myRole === 'x' ? '（あなた）' : ''}`}
           player="x"
           active={playing && currentTurn === 'x'}
+          timed={timed}
         />
       </div>
 

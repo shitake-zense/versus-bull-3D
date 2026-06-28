@@ -14,6 +14,17 @@ export type GameMode = 'online' | 'local' | 'ai';
 /** AI の強さ。easy=接待〜max=全力。useGameLogic / ai.ts で参照。 */
 export type AiLevel = 'easy' | 'normal' | 'hard' | 'max';
 
+/** 持ち時間設定。baseMs<=0 は「無制限」を表す（タイマーを動かさない）。 */
+export interface TimeControl {
+  /** 初期持ち時間(ms)。0 以下で無制限 */
+  baseMs: number;
+  /** フィッシャー加算(ms) */
+  incrementMs: number;
+}
+
+/** 先手（最初に着手する側）の希望。'random' は対局開始時に o/x へ解決。 */
+export type TurnPref = Player | 'random';
+
 export type RoomStatus = 'waiting' | 'countdown' | 'playing' | 'finished';
 
 export type Winner =
@@ -65,6 +76,10 @@ export interface RoomData {
   createdAt: number;
   /** 再戦リクエスト（両者 true で新ゲーム開始） */
   rematch?: { o?: boolean; x?: boolean };
+  /** 持ち時間設定（ホストが設定。未設定の旧ルームはデフォルト 5分+15秒） */
+  timeControl?: TimeControl;
+  /** 先手の希望（ホスト視点。o=ホスト先攻 / x=ホスト後攻 / random）。開始時に解決 */
+  turnPref?: TurnPref;
 }
 
 export interface PlayerSlot {

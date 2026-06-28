@@ -1,9 +1,17 @@
 // モード選択と、オンライン対戦の待機ロビー。
 
 import { useEffect, useRef, useState } from 'react';
-import type { AiLevel, Player, RoomData } from '../types';
+import type { AiLevel, Player, RoomData, TimeControl, TurnPref } from '../types';
 import { isFirebaseConfigured } from '../lib/firebase';
 import { AI_LEVEL_LABEL } from '../lib/teams';
+import {
+  BASE_PRESETS,
+  INCREMENT_PRESETS,
+  UNLIMITED,
+  formatTimeControl,
+  isUnlimited,
+  normalizeTimeControl,
+} from '../lib/timeControl';
 
 export interface WaitingState {
   roomId: string;
@@ -20,6 +28,11 @@ interface RoomLobbyProps {
   setPlayerName: (n: string) => void;
   /** ロビーでの名前変更（オンラインは自分のスロットへ即時反映） */
   onChangeName: (n: string) => void;
+  /** ローカル/AI/オンライン作成に使う持ち時間設定 */
+  timeControl: TimeControl;
+  setTimeControl: (tc: TimeControl) => void;
+  /** オンラインのロビーでホストが設定を変更（持ち時間・先手） */
+  onChangeSettings: (tc: TimeControl, pref: TurnPref) => void;
   onLocal: () => void;
   onAI: (side: Player, level: AiLevel) => void;
   onCreateRoom: () => void;
@@ -32,6 +45,9 @@ export function RoomLobby({
   playerName,
   setPlayerName,
   onChangeName,
+  timeControl,
+  setTimeControl,
+  onChangeSettings,
   onLocal,
   onAI,
   onCreateRoom,
@@ -39,9 +55,15 @@ export function RoomLobby({
   onStartGame,
   onLeave,
 }: RoomLobbyProps) {
-  const [aiSide, setAiSide] = useState<Player>('o');
+  const [aiSide, setAiSide] = useState<TurnPref>('o');
   const [aiLevel, setAiLevel] = useState<AiLevel>('normal');
   const [copied, setCopied] = useState(false);
+
+  // AI参戦時に side(先攻/後攻/ランダム)を実プレイヤーへ解決。
+  const startAI = () => {
+    const side: Player = aiSide === 'random' ? (Math.random() < 0.5 ? 'o' : 'x') : aiSide;
+    onAI(side, aiLevel);
+  };
 
   // 待機ロビーでの自分の表示名。Firebase 上のスロット名から一度だけ初期化する。
   const myRole = waiting?.myRole ?? null;
@@ -69,6 +91,8 @@ export function RoomLobby({
   if (waiting) {
     const bothJoined = Boolean(waiting.room?.players.o && waiting.room?.players.x);
     const isHost = waiting.myRole === 'o';
+    const roomTc = normalizeTimeControl(waiting.room?.timeControl);
+    const roomPref: TurnPref = waiting.room?.turnPref ?? 'o';
     return (
       <Shell>
         <h2 className="font-display text-2xl text-white">
@@ -120,10 +144,24 @@ export function RoomLobby({
           <SlotCard label="XENOGENESIS（X・黒・後攻）" name={waiting.room?.players.x?.name} ready={!!waiting.room?.players.x} />
         </div>
 
-        {/* ルーム設定（今後拡張予定のプレースホルダ） */}
-        <div className="w-full rounded-lg border border-dashed border-col-border bg-bg-void/40 px-3 py-2 text-xs text-col-ui">
-          ルール: 4×4 立体・タテヨコナナメ4連 / 持ち時間 5分＋15秒
-          <span className="ml-1 opacity-60">（設定変更は今後追加予定）</span>
+        {/* ルーム設定（ホストのみ編集可・待機中） */}
+        <div className="w-full rounded-lg border border-col-border bg-bg-void/40 px-3 py-3 text-xs text-col-ui">
+          <div>ルール: 4×4 立体・タテヨコナナメ4連</div>
+          {isHost ? (
+            <div className="mt-2.5 flex flex-col gap-2">
+              <TimeControlPicker
+                value={roomTc}
+                onChange={(tc) => onChangeSettings(tc, roomPref)}
+              />
+              <TurnOrderPicker value={roomPref} onChange={(p) => onChangeSettings(roomTc, p)} />
+            </div>
+          ) : (
+            <div className="mt-2">
+              持ち時間: <span className="text-white">{formatTimeControl(roomTc)}</span>
+              <span className="mx-2 opacity-50">/</span>
+              先手: <span className="text-white">{turnPrefLabel(roomPref)}</span>
+            </div>
+          )}
         </div>
 
         {bothJoined ? (
@@ -174,6 +212,15 @@ export function RoomLobby({
         />
       </div>
 
+      <div className="w-full">
+        <label className="mb-1 block text-xs uppercase tracking-wider text-col-ui">
+          持ち時間（ローカル / AI / オンライン作成時）
+        </label>
+        <div className="rounded-lg border border-col-border bg-bg-surface px-3 py-2">
+          <TimeControlPicker value={timeControl} onChange={setTimeControl} />
+        </div>
+      </div>
+
       <div className="flex w-full flex-col gap-3">
         <button
           onClick={onCreateRoom}
@@ -203,13 +250,13 @@ export function RoomLobby({
               <div className="text-xs text-col-ui">Minimax + 反復深化（立体読み）</div>
             </div>
             <div className="flex overflow-hidden rounded-md border border-col-border text-xs">
-              {(['o', 'x'] as Player[]).map((p) => (
+              {(['o', 'x', 'random'] as TurnPref[]).map((p) => (
                 <button
                   key={p}
                   onClick={() => setAiSide(p)}
                   className={`px-3 py-1.5 ${aiSide === p ? 'bg-col-gold/20 text-white' : 'text-col-ui'}`}
                 >
-                  {p === 'o' ? 'ORIGIN' : 'XENOGENESIS'}
+                  {p === 'o' ? 'ORIGIN' : p === 'x' ? 'XENOGENESIS' : 'ランダム'}
                 </button>
               ))}
             </div>
@@ -232,10 +279,15 @@ export function RoomLobby({
           </div>
 
           <button
-            onClick={() => onAI(aiSide, aiLevel)}
+            onClick={startAI}
             className="mt-3 w-full rounded-md border border-col-gold/50 bg-bg-void py-2 text-sm text-white hover:bg-col-gold/10"
           >
-            {aiSide === 'o' ? 'ORIGIN（先攻・白）' : 'XENOGENESIS（後攻・黒）'}・{AI_LEVEL_LABEL[aiLevel]}で参戦
+            {aiSide === 'o'
+              ? 'ORIGIN（先攻・白）'
+              : aiSide === 'x'
+                ? 'XENOGENESIS（後攻・黒）'
+                : 'ランダムな手番'}
+            ・{AI_LEVEL_LABEL[aiLevel]}で参戦
           </button>
         </div>
       </div>
@@ -251,6 +303,101 @@ function Shell({ children }: { children: React.ReactNode }) {
       </div>
     </div>
   );
+}
+
+/** 持ち時間（基本＋加算）と無制限トグルのピッカー。 */
+function TimeControlPicker({
+  value,
+  onChange,
+}: {
+  value: TimeControl;
+  onChange: (tc: TimeControl) => void;
+}) {
+  const unlimited = isUnlimited(value);
+  const rowCls = 'flex flex-1 overflow-hidden rounded-md border border-col-border';
+  const cellCls = (on: boolean) =>
+    `flex-1 py-1 ${on ? 'bg-col-gold/20 text-white' : 'text-col-ui'} disabled:opacity-30`;
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center gap-2">
+        <span className="w-10 shrink-0 text-[10px] uppercase tracking-wider text-col-ui">時間</span>
+        <div className={rowCls}>
+          {BASE_PRESETS.map((p) => (
+            <button
+              key={p.ms}
+              disabled={unlimited}
+              onClick={() => onChange({ baseMs: p.ms, incrementMs: value.incrementMs })}
+              className={cellCls(!unlimited && value.baseMs === p.ms)}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="w-10 shrink-0 text-[10px] uppercase tracking-wider text-col-ui">加算</span>
+        <div className={rowCls}>
+          {INCREMENT_PRESETS.map((p) => (
+            <button
+              key={p.ms}
+              disabled={unlimited}
+              onClick={() => onChange({ baseMs: value.baseMs, incrementMs: p.ms })}
+              className={cellCls(!unlimited && value.incrementMs === p.ms)}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <button
+        onClick={() => onChange(unlimited ? { baseMs: 300_000, incrementMs: 15_000 } : UNLIMITED)}
+        className={`rounded-md border py-1 text-xs ${
+          unlimited
+            ? 'border-col-gold/60 bg-col-gold/20 text-white'
+            : 'border-col-border text-col-ui'
+        }`}
+      >
+        無制限{unlimited ? '（ON）' : ''}
+      </button>
+    </div>
+  );
+}
+
+/** 先手（先攻/後攻/ランダム）のピッカー。ホスト視点。 */
+function TurnOrderPicker({
+  value,
+  onChange,
+}: {
+  value: TurnPref;
+  onChange: (p: TurnPref) => void;
+}) {
+  const opts: { v: TurnPref; label: string }[] = [
+    { v: 'o', label: '自分が先攻' },
+    { v: 'x', label: '自分が後攻' },
+    { v: 'random', label: 'ランダム' },
+  ];
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-10 shrink-0 text-[10px] uppercase tracking-wider text-col-ui">先手</span>
+      <div className="flex flex-1 overflow-hidden rounded-md border border-col-border">
+        {opts.map((o) => (
+          <button
+            key={o.v}
+            onClick={() => onChange(o.v)}
+            className={`flex-1 py-1 ${value === o.v ? 'bg-col-gold/20 text-white' : 'text-col-ui'}`}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** 先手設定の表示ラベル（参加側向け）。 */
+function turnPrefLabel(p: TurnPref): string {
+  if (p === 'random') return 'ランダム';
+  return p === 'o' ? 'ORIGIN が先手' : 'XENOGENESIS が先手';
 }
 
 function SlotCard({ label, name, ready }: { label: string; name?: string; ready: boolean }) {

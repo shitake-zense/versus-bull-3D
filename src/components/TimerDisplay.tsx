@@ -5,6 +5,8 @@ interface TimerDisplayProps {
   label: string;
   player: 'o' | 'x';
   active: boolean;
+  /** 持ち時間制か。false（無制限）なら ∞ を表示し赤脈動しない */
+  timed?: boolean;
 }
 
 const LOW_TIME_MS = 30_000;
@@ -22,8 +24,8 @@ function format(ms: number): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-export function TimerDisplay({ ms, label, player, active }: TimerDisplayProps) {
-  const low = ms < LOW_TIME_MS;
+export function TimerDisplay({ ms, label, player, active, timed = true }: TimerDisplayProps) {
+  const low = timed && ms < LOW_TIME_MS;
   // O=白, X=黒（UIでは視認性のため明スレートで表現）
   const accent = player === 'o' ? '#F2F2F2' : '#AEB6C6';
 
@@ -47,7 +49,7 @@ export function TimerDisplay({ ms, label, player, active }: TimerDisplayProps) {
         className="font-mono text-2xl sm:text-3xl leading-tight tabular-nums"
         style={{ color: low ? '#E84040' : accent }}
       >
-        {format(ms)}
+        {timed ? format(ms) : '∞'}
       </div>
     </div>
   );
