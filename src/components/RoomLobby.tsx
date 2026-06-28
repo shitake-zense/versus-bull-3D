@@ -296,10 +296,14 @@ export function RoomLobby({
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
+  // 内容が画面より高いときはスクロールできるように overflow-y-auto。
+  // min-h-full + my-auto で、収まる時は中央寄せ・あふれる時は上端から流す。
   return (
-    <div className="absolute inset-0 flex items-center justify-center p-4">
-      <div className="flex w-full max-w-md flex-col items-center gap-5 rounded-2xl border border-col-border bg-bg-surface/90 p-6 shadow-2xl backdrop-blur">
-        {children}
+    <div className="absolute inset-0 overflow-y-auto overscroll-contain">
+      <div className="flex min-h-full justify-center p-4">
+        <div className="my-auto flex w-full max-w-md flex-col items-center gap-5 rounded-2xl border border-col-border bg-bg-surface/90 p-6 shadow-2xl backdrop-blur">
+          {children}
+        </div>
       </div>
     </div>
   );
