@@ -12,6 +12,7 @@ interface Scene3DProps {
   winLine: WinLine | null;
   canPlace: boolean;
   currentTurn: Player;
+  lastMove: { cell: number; layer: number } | null;
   pendingView: CameraView | null;
   onViewConsumed: () => void;
   onCellClick: (cell: number) => void;
@@ -70,6 +71,7 @@ export function Scene3D(props: Scene3DProps) {
         winLine={winLine}
         canPlace={props.canPlace}
         currentTurn={props.currentTurn}
+        lastMove={props.lastMove}
         onCellClick={props.onCellClick}
       />
 

@@ -26,9 +26,11 @@ interface Piece3DProps {
   layer: number;
   player: Player;
   winning?: boolean;
+  /** 仮置き（自分だけに見えるゴースト）。落下せず半透明で発光 パルスする。 */
+  ghost?: boolean;
 }
 
-export function Piece3D({ position, layer, player, winning = false }: Piece3DProps) {
+export function Piece3D({ position, layer, player, winning = false, ghost = false }: Piece3DProps) {
   const groupRef = useRef<Group>(null);
   const startRef = useRef<number>(performance.now());
   const targetY = layerY(layer);
@@ -41,15 +43,29 @@ export function Piece3D({ position, layer, player, winning = false }: Piece3DPro
       emissiveIntensity: palette.emissiveBase,
       roughness: 0.45,
       metalness: 0.25,
+      transparent: ghost,
+      opacity: ghost ? 0.45 : 1,
+      depthWrite: !ghost,
     });
-  }, [palette]);
+  }, [palette, ghost]);
 
   const baseEmissive = useMemo(() => new Color(palette.emissive), [palette]);
   const goldEmissive = useMemo(() => new Color('#FFD700'), []);
+  const ghostEmissive = useMemo(() => new Color('#39C7FF'), []);
 
   useFrame(() => {
     const group = groupRef.current;
     if (!group) return;
+
+    // 仮置き: 落下させず定位置で発光パルス（実ピースと明確に区別）。
+    if (ghost) {
+      group.position.y = targetY;
+      const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 240);
+      material.emissiveIntensity = 0.35 + pulse * 0.6;
+      material.emissive.lerp(ghostEmissive, 0.2);
+      return;
+    }
+
     const t = Math.min(1, (performance.now() - startRef.current) / DROP_MS);
     group.position.y = targetY + DROP_FROM * (1 - easeOut(t));
 
@@ -60,7 +76,7 @@ export function Piece3D({ position, layer, player, winning = false }: Piece3DPro
   });
 
   return (
-    <group ref={groupRef} position={[position[0], targetY + DROP_FROM, position[1]]}>
+    <group ref={groupRef} position={[position[0], ghost ? targetY : targetY + DROP_FROM, position[1]]}>
       {player === 'o' ? (
         // O = 角ばった四角いリング（実物の白い角マルに合わせて4本のバーで額縁状に）
         <group>

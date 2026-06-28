@@ -1,7 +1,8 @@
 // ボード面・グリッド・ピース群・ホバープレビュー・クリック判定を描画する。
 
-import { useMemo, useState } from 'react';
-import type { ThreeEvent } from '@react-three/fiber';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useFrame, type ThreeEvent } from '@react-three/fiber';
+import type { Group } from 'three';
 import type { Board, Player, WinLine } from '../types';
 import { BOARD_DIM, CELL_COUNT } from '../lib/gameLogic';
 import { Piece3D, layerY } from './Piece3D';
@@ -21,11 +22,30 @@ interface Board3DProps {
   winLine: WinLine | null;
   canPlace: boolean;
   currentTurn: Player;
+  /** 相手が直前に置いたピース（強調表示用）。 */
+  lastMove: { cell: number; layer: number } | null;
   onCellClick: (cell: number) => void;
 }
 
-export function Board3D({ board, winLine, canPlace, currentTurn, onCellClick }: Board3DProps) {
+export function Board3D({
+  board,
+  winLine,
+  canPlace,
+  currentTurn,
+  lastMove,
+  onCellClick,
+}: Board3DProps) {
   const [hovered, setHovered] = useState<number | null>(null);
+  // 仮置きしているマス（1回目のクリックで設定、同じマスを再クリックで確定）。
+  const [tentative, setTentative] = useState<number | null>(null);
+
+  // 自分の手番でなくなったら、または盤面が変わったら仮置きを破棄する。
+  useEffect(() => {
+    if (!canPlace) setTentative(null);
+  }, [canPlace]);
+  useEffect(() => {
+    setTentative(null);
+  }, [board]);
 
   const winSet = useMemo(() => {
     if (!winLine) return null;
@@ -59,6 +79,22 @@ export function Board3D({ board, winLine, canPlace, currentTurn, onCellClick }: 
         ));
       })}
 
+      {/* 仮置きピース（自分だけに見えるゴースト。確定前なので相手には未送信） */}
+      {canPlace && tentative !== null && (
+        <Piece3D
+          key={`ghost-${tentative}-${board[tentative].length}`}
+          position={cellToXZ(tentative)}
+          layer={board[tentative].length}
+          player={currentTurn}
+          ghost
+        />
+      )}
+
+      {/* 相手が直前に置いたピースの強調マーカー（勝利演出中は出さない） */}
+      {lastMove && !winLine && (
+        <LastMoveMarker cell={lastMove.cell} layer={lastMove.layer} />
+      )}
+
       {/* ホバープレビュー（白リング） */}
       {canPlace && hovered !== null && (
         <mesh
@@ -91,7 +127,15 @@ export function Board3D({ board, winLine, canPlace, currentTurn, onCellClick }: 
             onPointerOut={() => setHovered((h) => (h === cell ? null : h))}
             onClick={(e: ThreeEvent<MouseEvent>) => {
               e.stopPropagation();
-              if (canPlace) onCellClick(cell);
+              if (!canPlace) return;
+              // 2クリック制: 1回目は仮置き、同じマスの2回目で確定。
+              // 別マスをクリックした場合は仮置きをそのマスへ移動する。
+              if (tentative === cell) {
+                onCellClick(cell);
+                setTentative(null);
+              } else {
+                setTentative(cell);
+              }
             }}
           >
             <planeGeometry args={[CELL, CELL]} />
@@ -99,6 +143,45 @@ export function Board3D({ board, winLine, canPlace, currentTurn, onCellClick }: 
           </mesh>
         );
       })}
+    </group>
+  );
+}
+
+/** 直前の着手を指し示す、ピース上部で明滅・上下するマゼンタのリング＋下向き矢印。 */
+function LastMoveMarker({ cell, layer }: { cell: number; layer: number }) {
+  const ref = useRef<Group>(null);
+  const [x, z] = cellToXZ(cell);
+  const baseY = layerY(layer) + 0.5;
+
+  useFrame(() => {
+    const m = ref.current;
+    if (!m) return;
+    const t = performance.now() / 320;
+    const s = 1 + 0.16 * Math.sin(t);
+    m.scale.set(s, s, s);
+    m.position.y = baseY + 0.06 * Math.sin(t);
+  });
+
+  return (
+    <group ref={ref} position={[x, baseY, z]}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[0.34, 0.05, 12, 36]} />
+        <meshStandardMaterial
+          color="#FF4FB0"
+          emissive="#FF4FB0"
+          emissiveIntensity={1.5}
+          transparent
+          opacity={0.9}
+        />
+      </mesh>
+      <mesh position={[0, 0.26, 0]} rotation={[Math.PI, 0, 0]}>
+        <coneGeometry args={[0.13, 0.22, 4]} />
+        <meshStandardMaterial
+          color="#FF4FB0"
+          emissive="#FF4FB0"
+          emissiveIntensity={1.5}
+        />
+      </mesh>
     </group>
   );
 }

@@ -147,13 +147,29 @@ export default function App() {
     }
   }, [isOnline, status, runCountdown]);
 
-  // ---- 効果音（着手は盤面のピース増加で検知＝ローカル/リモート/AI 共通） ----
+  // ---- 効果音＋直前着手の検知（盤面のピース増加で検知＝ローカル/リモート/AI 共通） ----
   const totalPieces = board.reduce((a, c) => a + c.length, 0);
   const prevTotal = useRef(0);
+  const prevBoard = useRef<typeof board>(board);
+  const [lastMove, setLastMove] = useState<{ cell: number; layer: number } | null>(null);
   useEffect(() => {
-    if (totalPieces > prevTotal.current) playPlace();
+    const prev = prevBoard.current;
+    if (totalPieces > prevTotal.current) {
+      playPlace();
+      // 増えたマスを直前の着手として強調する。
+      for (let c = 0; c < board.length; c++) {
+        if (board[c].length > (prev[c]?.length ?? 0)) {
+          setLastMove({ cell: c, layer: board[c].length - 1 });
+          break;
+        }
+      }
+    } else if (totalPieces < prevTotal.current) {
+      // 新規対局・再戦などで盤面がリセットされたらマーカーを消す。
+      setLastMove(null);
+    }
     prevTotal.current = totalPieces;
-  }, [totalPieces, playPlace]);
+    prevBoard.current = board;
+  }, [totalPieces, board, playPlace]);
 
   useEffect(() => {
     if (winner === 'o' || winner === 'x') playWin();
@@ -304,6 +320,7 @@ export default function App() {
         winLine={winLine}
         canPlace={canPlace}
         currentTurn={activePlayer}
+        lastMove={lastMove}
         pendingView={pendingView}
         onViewConsumed={() => setPendingView(null)}
         onCellClick={place}
