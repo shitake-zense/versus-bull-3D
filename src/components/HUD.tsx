@@ -1,6 +1,7 @@
 // 3Dキャンバスの上に React DOM で重ねる2D HUD。
 // タイマー・手番・残ピース・スコア・カメラ切替・結果/再戦を表示する。
 
+import { useEffect, useState } from 'react';
 import type { GameMode, Player, RoomStatus, Winner } from '../types';
 import { INITIAL_PIECES } from '../lib/gameLogic';
 import { TEAM } from '../lib/teams';
@@ -62,6 +63,12 @@ export function HUD(props: HUDProps) {
   } = props;
 
   const playing = status === 'playing' && !winner;
+
+  // 対局終了後に結果オーバーレイを一時的に隠して盤面を確認できる。
+  const [reviewing, setReviewing] = useState(false);
+  useEffect(() => {
+    if (!winner) setReviewing(false);
+  }, [winner]);
 
   return (
     <div className="pointer-events-none absolute inset-0 select-none">
@@ -137,7 +144,7 @@ export function HUD(props: HUDProps) {
       )}
 
       {/* 結果オーバーレイ */}
-      {winner && (
+      {winner && !reviewing && (
         <div className="pointer-events-auto absolute inset-0 flex flex-col items-center justify-center bg-bg-void/70 px-5 backdrop-blur-sm">
           <div className="break-words text-center font-display text-3xl font-bold leading-tight text-col-gold drop-shadow-[0_0_18px_rgba(255,215,0,0.5)] sm:text-5xl">
             {resultText(winner).title}
@@ -158,6 +165,24 @@ export function HUD(props: HUDProps) {
               メニューへ
             </button>
           </div>
+          <button
+            onClick={() => setReviewing(true)}
+            className="mt-5 text-sm text-col-ui underline underline-offset-4 transition-colors hover:text-white"
+          >
+            盤面を確認する
+          </button>
+        </div>
+      )}
+
+      {/* 盤面確認モード: 結果を隠して盤面だけ表示（カメラ切替で観察可能） */}
+      {winner && reviewing && (
+        <div className="pointer-events-auto absolute bottom-16 left-1/2 -translate-x-1/2 sm:bottom-20">
+          <button
+            onClick={() => setReviewing(false)}
+            className="rounded-full border border-col-gold/60 bg-bg-surface/90 px-5 py-2 font-display text-sm text-white shadow-lg backdrop-blur transition-colors hover:bg-col-gold/10"
+          >
+            結果へ戻る
+          </button>
         </div>
       )}
     </div>

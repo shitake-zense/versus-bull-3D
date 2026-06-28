@@ -272,6 +272,15 @@ export default function App() {
     [isOnline, fb, offline],
   );
 
+  // ロビーでの名前変更（オンラインは自分のスロットへ即時反映）。
+  const handleChangeName = useCallback(
+    (name: string) => {
+      setPlayerName(name);
+      if (isOnline) fb.updateName(name);
+    },
+    [isOnline, fb],
+  );
+
   // ---- 表示判定 ----
   const showLobby = mode === null || (isOnline && (!room || room.status === 'waiting'));
 
@@ -350,6 +359,7 @@ export default function App() {
         <RoomLobby
           playerName={playerName}
           setPlayerName={setPlayerName}
+          onChangeName={handleChangeName}
           onLocal={beginLocal}
           onAI={beginAI}
           onCreateRoom={createRoom}

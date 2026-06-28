@@ -1,6 +1,6 @@
 // モード選択と、オンライン対戦の待機ロビー。
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Player, RoomData } from '../types';
 import { isFirebaseConfigured } from '../lib/firebase';
 
@@ -17,6 +17,8 @@ export interface WaitingState {
 interface RoomLobbyProps {
   playerName: string;
   setPlayerName: (n: string) => void;
+  /** ロビーでの名前変更（オンラインは自分のスロットへ即時反映） */
+  onChangeName: (n: string) => void;
   onLocal: () => void;
   onAI: (side: Player) => void;
   onCreateRoom: () => void;
@@ -28,6 +30,7 @@ interface RoomLobbyProps {
 export function RoomLobby({
   playerName,
   setPlayerName,
+  onChangeName,
   onLocal,
   onAI,
   onCreateRoom,
@@ -37,6 +40,18 @@ export function RoomLobby({
 }: RoomLobbyProps) {
   const [aiSide, setAiSide] = useState<Player>('o');
   const [copied, setCopied] = useState(false);
+
+  // 待機ロビーでの自分の表示名。Firebase 上のスロット名から一度だけ初期化する。
+  const myRole = waiting?.myRole ?? null;
+  const mySlotName = myRole ? waiting?.room?.players[myRole]?.name ?? '' : '';
+  const [nameDraft, setNameDraft] = useState('');
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (!seeded.current && myRole && mySlotName) {
+      setNameDraft(mySlotName);
+      seeded.current = true;
+    }
+  }, [myRole, mySlotName]);
 
   const copy = async () => {
     if (!waiting) return;
@@ -60,6 +75,24 @@ export function RoomLobby({
         <p className="text-sm text-col-ui">
           ルームID: <span className="font-mono text-white">{waiting.roomId}</span>
         </p>
+
+        {waiting.myRole && (
+          <div className="w-full">
+            <label className="mb-1 block text-xs uppercase tracking-wider text-col-ui">
+              あなたの名前（{waiting.myRole === 'o' ? 'ORIGIN・先攻' : 'XENOGENESIS・後攻'}）
+            </label>
+            <input
+              value={nameDraft}
+              onChange={(e) => {
+                setNameDraft(e.target.value);
+                onChangeName(e.target.value);
+              }}
+              maxLength={16}
+              placeholder={waiting.myRole === 'o' ? 'O' : 'X'}
+              className="w-full rounded-md border border-col-border bg-bg-void px-3 py-2 text-white outline-none focus:border-col-gold/60"
+            />
+          </div>
+        )}
 
         {!waiting.isGuest && (
           <div className="w-full">

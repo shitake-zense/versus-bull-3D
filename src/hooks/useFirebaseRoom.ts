@@ -58,6 +58,8 @@ export interface UseFirebaseRoomResult {
   joinRoom: () => Promise<void>;
   /** ロビーから対戦開始（ホストのみ） */
   startGame: () => void;
+  /** 自分のスロットの表示名を更新（ロビーで参加側も変更可能） */
+  updateName: (name: string) => void;
   place: (cell: number) => void;
   reportTimeout: (player: Player) => void;
   requestRematch: () => void;
@@ -220,6 +222,17 @@ export function useFirebaseRoom(
     void update(dbRoom(), { status: 'countdown' });
   }, [roomId, dbRoom]);
 
+  // 自分のスロットの表示名を更新（ロビー待機中に参加側/ホスト双方が変更可能）。
+  const updateName = useCallback(
+    (name: string) => {
+      const role = myRoleRef.current;
+      if (!roomId || !role) return;
+      const fallback = role === 'o' ? 'O' : 'X';
+      void update(dbRoom(), { [`players/${role}/name`]: name.trim() || fallback });
+    },
+    [roomId, dbRoom],
+  );
+
   const place = useCallback(
     (cell: number) => {
       const cur = roomRef.current;
@@ -302,6 +315,7 @@ export function useFirebaseRoom(
     createRoom,
     joinRoom,
     startGame,
+    updateName,
     place,
     reportTimeout,
     requestRematch,
