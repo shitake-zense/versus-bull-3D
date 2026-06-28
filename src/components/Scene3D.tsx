@@ -39,8 +39,8 @@ export function Scene3D(props: Scene3DProps) {
       camera={{ position: [0, 5.4, 7.4], fov: 45, near: 0.1, far: 100 }}
       gl={{ antialias: true }}
     >
-      <color attach="background" args={['#14161B']} />
-      <fog attach="fog" args={['#14161B', 16, 30]} />
+      <color attach="background" args={['#1C4A6E']} />
+      <fog attach="fog" args={['#1C4A6E', 16, 30]} />
 
       <ambientLight intensity={0.4} />
       <directionalLight
