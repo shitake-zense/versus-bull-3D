@@ -1,12 +1,16 @@
 # versus bull 3D (vsb3)
 
+### ▶ いますぐプレイ: <https://shitake-zense.github.io/versus-bull-3D/>
+
 4×4のボードにO（マル）/X（バツ）のピースを積み上げ、**立体空間で縦・横・斜め・階段状いずれか4連**を作ると勝利する3D版まるばつゲーム。
 React 18 + Three.js (@react-three/fiber) + Firebase Realtime Database + GitHub Pages。
 
-- **オンライン対戦**: ルームを作成し、招待リンクを共有して友人と対戦
+- **オンライン対戦**: ルームを作成し、招待リンクを共有して友人と対戦。ロビーで持ち時間・先手・プレイヤー名を設定可能
 - **ローカル対戦**: 同じ端末で2人が交互に操作
-- **AI対戦**: Minimax（深さ3）+ α-β枝刈り
-- **持ち時間**: 将棋式フィッシャークロック（初期5分・着手ごとに+15秒）
+- **AI対戦**: Minimax + 反復深化 + α-β枝刈り。**難易度4段階**（やさしい / ふつう / つよい / 最強）
+- **持ち時間**: 将棋式フィッシャークロック。プリセット（基本 1/3/5/10分 ＋ 加算 0/5/15/30秒）と**無制限**から選択
+- **先攻/後攻**: オンラインはホストが先攻/後攻/ランダムを選択、AIは手番をランダムにも設定可
+- **プレイ補助**: リーチ警告（相手が次に4連を作れるマスを赤リングで強調）／直前着手マーカー／2クリック仮置き／終局後の盤面確認
 
 ---
 
@@ -24,10 +28,13 @@ React 18 + Three.js (@react-three/fiber) + Firebase Realtime Database + GitHub P
 
 | 操作 | 挙動 |
 |------|------|
-| ドラッグ / スワイプ | 視点回転 |
-| ホイール / ピンチ | ズーム |
+| マスをクリック / タップ（1回目） | 仮置き（自分だけに見えるゴースト。相手には未送信） |
+| 同じマスをもう一度クリック / タップ | 着手を確定 |
+| 別のマスをクリック / タップ | 仮置きをそのマスへ移動 |
 | キー `1` / `2` / `3`、または右下ボタン | トップ / デフォルト / ドラマチック視点 |
-| マスをクリック / タップ | 着手 |
+| 右下「リーチ警告 ON/OFF」 | 相手の即勝ちマス表示の切替 |
+
+> 視点は3つのプリセット切替式（自由回転/ズームは今後対応予定）。
 
 ---
 
@@ -79,37 +86,37 @@ npm run dev
 
 ## GitHub Pages へデプロイ
 
+公開URL: <https://shitake-zense.github.io/versus-bull-3D/>
 配信先リポジトリ: <https://github.com/shitake-zense/versus-bull-3D>
 （`vite.config.ts` の `base` と `package.json` の `homepage` はこのリポジトリ用に設定済み）
 
-```bash
-# 1. まだ push していなければ main を push
-git push -u origin main
+**デプロイ = `main` への push**。`.github/workflows/deploy.yml` が GitHub Actions でビルドし、Pages へ自動公開します。
 
-# 2. 本番ビルド + gh-pages ブランチへ公開（1コマンド）
-npm run deploy
+```bash
+git push        # main へ push すると Actions が build → Pages 公開を実行
 ```
 
-`predeploy` で本番ビルドが走り、`gh-pages` ブランチへ `dist/` が公開されます。
-初回のみ GitHub の **Settings → Pages** で Source が `gh-pages` ブランチ（`/root`）になっていることを確認してください。
+初回のみ GitHub の **Settings → Pages** で Source が **「GitHub Actions」** になっていることを確認してください。
+（`gh-pages` ブランチ方式の `npm run deploy` も残っていますが、非対話シェルでは認証が不安定なため Actions 経路を推奨）
 
-公開URL: <https://shitake-zense.github.io/versus-bull-3D/>
+### 招待して対戦するには
 
 トップで「オンライン対戦」→ ルーム作成すると招待リンクが自動でクリップボードにコピーされます。
-そのリンク（`https://shitake-zense.github.io/versus-bull-3D/?room=<roomId>`）を友人に送ると、相手がアクセスした時点で対戦が始まります。
-※ オンライン対戦には別途 Firebase の設定（`.env`）が必要です（上記「セットアップ」参照）。
+そのリンク（`https://shitake-zense.github.io/versus-bull-3D/?room=<roomId>`）を友人に送ると、双方がロビーに入り、**ホストの「対戦開始」**で始まります。
+※ 公開サイトには Firebase 設定が同梱されているのでそのまま対戦できます。自分の Firebase で動かす場合のみ `.env` 設定が必要です（上記「セットアップ」参照）。
 
 ---
 
 ## 開発メモ
 
 - `src/lib/gameLogic.ts` … 勝利判定・盤面操作の純粋関数（UI/AI/同期の共通基盤）
-- `src/lib/ai.ts` … Minimax + α-β
+- `src/lib/ai.ts` … Minimax + 反復深化 + α-β（難易度 `LEVELS` で思考時間・読み深さ・ミス率を切替）
+- `src/lib/timeControl.ts` … 持ち時間プリセットとヘルパー（無制限・正規化・表示整形）
 - `src/hooks/useGameLogic.ts` … ローカル/AI の状態機械
-- `src/hooks/useFirebaseRoom.ts` … オンライン同期（サーバー時刻補正・トランザクション勝敗確定）
+- `src/hooks/useFirebaseRoom.ts` … オンライン同期（サーバー時刻補正・トランザクション勝敗確定・ルーム設定）
 - `src/components/*3D.tsx` … Three.js 描画
 
-### 将来拡張 (TODO)
-- ブロッカーピース（`gameLogic.ts` の `legalMoves` に除外ロジックを追加する想定）
-- Firebase セキュリティルールの厳格化（手番・スキーマ検証）
-- firebase / three の動的 import によるバンドル分割
+詳しい設計指針は [CLAUDE.md](./CLAUDE.md)、今後の開発方針・優先度は [ROADMAP.md](./ROADMAP.md) を参照。
+
+### 将来拡張
+ブロッカーピース、自由カメラ＋リプレイ、観戦モード、Firebase ルール厳格化、バンドル分割など。詳細と優先度は [ROADMAP.md](./ROADMAP.md) にまとめています。
