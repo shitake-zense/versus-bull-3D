@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AiLevel, GameMode, Player, TimeControl, Winner } from './types';
-import { recordToBoard, scanWin } from './lib/gameLogic';
+import { applyMove, checkWinAt, oppositeOf, recordToBoard, scanWin } from './lib/gameLogic';
 import { DEFAULT_TIME_CONTROL, isUnlimited, normalizeTimeControl } from './lib/timeControl';
 import { generateRoomId } from './lib/roomId';
 import { AI_LEVEL_LABEL, TEAM } from './lib/teams';
@@ -31,6 +31,7 @@ export default function App() {
   const [isGuest, setIsGuest] = useState(false);
 
   const [pendingView, setPendingView] = useState<CameraView | null>(null);
+  const [showThreats, setShowThreats] = useState(true);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [offlineCountingDown, setOfflineCountingDown] = useState(false);
 
@@ -91,6 +92,19 @@ export default function App() {
   const piecesLeft = isOnline
     ? room?.piecesLeft ?? { o: 32, x: 32 }
     : offline.state.piecesLeft;
+
+  // リーチ警告: 相手が「次に1手で4連を作れる」マス（＝今ブロックすべき脅威）。
+  const threats = useMemo(() => {
+    if (!running) return [];
+    const opp = oppositeOf(activePlayer);
+    if (piecesLeft[opp] <= 0) return [];
+    const res: { cell: number; layer: number }[] = [];
+    for (let c = 0; c < board.length; c++) {
+      const next = applyMove(board, c, opp);
+      if (checkWinAt(next, c, opp)) res.push({ cell: c, layer: board[c].length });
+    }
+    return res;
+  }, [running, board, activePlayer, piecesLeft]);
 
   // 有効な持ち時間設定（オンラインはルーム値、ローカル/AI は App 状態）。
   const activeTimeControl = useMemo(
@@ -342,6 +356,7 @@ export default function App() {
         canPlace={canPlace}
         currentTurn={activePlayer}
         lastMove={lastMove}
+        threats={showThreats ? threats : []}
         pendingView={pendingView}
         onViewConsumed={() => setPendingView(null)}
         onCellClick={place}
@@ -361,6 +376,8 @@ export default function App() {
           myRole={myRole}
           countdown={countdown}
           disconnected={disconnected}
+          showThreats={showThreats}
+          onToggleThreats={() => setShowThreats((v) => !v)}
           onSelectView={setPendingView}
           onRematch={handleRematch}
           onExit={exitToMenu}

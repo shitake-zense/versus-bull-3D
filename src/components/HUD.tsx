@@ -21,6 +21,8 @@ interface HUDProps {
   myRole: Player | null;
   countdown: number | null;
   disconnected: boolean;
+  showThreats: boolean;
+  onToggleThreats: () => void;
   onSelectView: (v: CameraView) => void;
   onRematch: () => void;
   onExit: () => void;
@@ -58,6 +60,8 @@ export function HUD(props: HUDProps) {
     myRole,
     countdown,
     disconnected,
+    showThreats,
+    onToggleThreats,
     onSelectView,
     onRematch,
     onExit,
@@ -108,18 +112,32 @@ export function HUD(props: HUDProps) {
         <PieceCount player="x" left={piecesLeft.x} />
       </div>
 
-      {/* カメラビュー切替 */}
-      <div className="pointer-events-auto absolute bottom-3 right-3 flex gap-2 sm:bottom-4 sm:right-4">
-        {([1, 2, 3] as CameraView[]).map((v) => (
-          <button
-            key={v}
-            onClick={() => onSelectView(v)}
-            className="h-9 w-9 rounded-md border border-col-border bg-bg-surface font-mono text-col-ui transition-colors hover:border-col-gold/60 hover:text-white"
-            title={v === 1 ? 'トップ' : v === 2 ? 'デフォルト' : 'ドラマチック'}
-          >
-            {v}
-          </button>
-        ))}
+      {/* リーチ表示トグル ＋ カメラビュー切替 */}
+      <div className="pointer-events-auto absolute bottom-3 right-3 flex flex-col items-end gap-2 sm:bottom-4 sm:right-4">
+        <button
+          onClick={onToggleThreats}
+          className={[
+            'rounded-md border px-2.5 py-1.5 font-display text-xs transition-colors',
+            showThreats
+              ? 'border-[#FF3B30]/70 bg-[#FF3B30]/15 text-white'
+              : 'border-col-border bg-bg-surface text-col-ui hover:text-white',
+          ].join(' ')}
+          title="相手が次に4連を作れるマス（リーチ）を赤リングで警告"
+        >
+          リーチ警告 {showThreats ? 'ON' : 'OFF'}
+        </button>
+        <div className="flex gap-2">
+          {([1, 2, 3] as CameraView[]).map((v) => (
+            <button
+              key={v}
+              onClick={() => onSelectView(v)}
+              className="h-9 w-9 rounded-md border border-col-border bg-bg-surface font-mono text-col-ui transition-colors hover:border-col-gold/60 hover:text-white"
+              title={v === 1 ? 'トップ' : v === 2 ? 'デフォルト' : 'ドラマチック'}
+            >
+              {v}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* 手番インジケーター */}

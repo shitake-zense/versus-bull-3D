@@ -24,6 +24,8 @@ interface Board3DProps {
   currentTurn: Player;
   /** 相手が直前に置いたピース（強調表示用）。 */
   lastMove: { cell: number; layer: number } | null;
+  /** 相手が次に4連を作れるマス（リーチ警告）。着地層も含む。 */
+  threats: { cell: number; layer: number }[];
   onCellClick: (cell: number) => void;
 }
 
@@ -33,6 +35,7 @@ export function Board3D({
   canPlace,
   currentTurn,
   lastMove,
+  threats,
   onCellClick,
 }: Board3DProps) {
   const [hovered, setHovered] = useState<number | null>(null);
@@ -95,6 +98,12 @@ export function Board3D({
         <LastMoveMarker cell={lastMove.cell} layer={lastMove.layer} />
       )}
 
+      {/* リーチ警告マーカー（相手が次に4連を作れる着地マスを赤リングで） */}
+      {!winLine &&
+        threats.map((t) => (
+          <ThreatMarker key={`threat-${t.cell}`} cell={t.cell} layer={t.layer} />
+        ))}
+
       {/* ホバープレビュー（白リング） */}
       {canPlace && hovered !== null && (
         <mesh
@@ -143,6 +152,36 @@ export function Board3D({
           </mesh>
         );
       })}
+    </group>
+  );
+}
+
+/** リーチ警告。相手が次に置けば4連になる着地マスを、明滅する赤リングで示す。 */
+function ThreatMarker({ cell, layer }: { cell: number; layer: number }) {
+  const ref = useRef<Group>(null);
+  const [x, z] = cellToXZ(cell);
+  const y = layerY(layer);
+
+  useFrame(() => {
+    const m = ref.current;
+    if (!m) return;
+    const t = performance.now() / 260;
+    const s = 1 + 0.12 * Math.sin(t);
+    m.scale.set(s, s, s);
+  });
+
+  return (
+    <group ref={ref} position={[x, y, z]}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[0.44, 0.055, 12, 36]} />
+        <meshStandardMaterial
+          color="#FF3B30"
+          emissive="#FF3B30"
+          emissiveIntensity={1.4}
+          transparent
+          opacity={0.85}
+        />
+      </mesh>
     </group>
   );
 }
