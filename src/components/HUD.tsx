@@ -2,9 +2,10 @@
 // タイマー・手番・残ピース・スコア・カメラ切替・結果/再戦を表示する。
 
 import type { ReactNode } from 'react';
-import type { GameMode, Player, RoomStatus, Winner } from '../types';
+import type { GameMode, Player, RoomStatus, Seat, Winner } from '../types';
 import { INITIAL_PIECES } from '../lib/gameLogic';
 import { TEAM } from '../lib/teams';
+import { seatSuffix } from '../lib/seats';
 import type { CameraView } from './CameraController';
 import { TimerDisplay } from './TimerDisplay';
 
@@ -19,6 +20,16 @@ interface HUDProps {
   score: Record<Player, number>;
   winner: Winner;
   myRole: Player | null;
+  /** 2vs2 チーム戦か */
+  teamMode: boolean;
+  /** チーム戦のメンバー名簿（o/x それぞれ [席1, 席2]）。1vs1 は null */
+  roster: { o: string[]; x: string[] } | null;
+  /** 今この手を指す人の表示名 */
+  activeName: string;
+  /** 手番の人が自分か（「あなた」表示用） */
+  activeIsMe: boolean;
+  /** 今この手を指す席（チーム戦のメンバーハイライト用） */
+  activeSeat: Seat;
   countdown: number | null;
   disconnected: boolean;
   showThreats: boolean;
@@ -77,6 +88,11 @@ export function HUD(props: HUDProps) {
     score,
     winner,
     myRole,
+    teamMode,
+    roster,
+    activeName,
+    activeIsMe,
+    activeSeat,
     countdown,
     disconnected,
     showThreats,
@@ -108,10 +124,15 @@ export function HUD(props: HUDProps) {
       <div className="absolute left-0 right-0 top-0 flex items-start justify-between p-3 sm:p-4">
         <TimerDisplay
           ms={displayRemaining.o}
-          label={`${names.o}${myRole === 'o' ? '（あなた）' : ''}`}
+          label={`${names.o}${!teamMode && myRole === 'o' ? '（あなた）' : ''}`}
           player="o"
           active={playing && currentTurn === 'o'}
           timed={timed}
+          sub={
+            teamMode && roster ? (
+              <TeamRoster members={roster.o} seats={['o', 'o2']} activeSeat={activeSeat} />
+            ) : undefined
+          }
         />
         <div className="mt-1 shrink-0 px-1 text-center font-display">
           <div className="hidden text-[10px] uppercase tracking-[0.3em] text-col-ui sm:block">
@@ -125,10 +146,15 @@ export function HUD(props: HUDProps) {
         </div>
         <TimerDisplay
           ms={displayRemaining.x}
-          label={`${names.x}${myRole === 'x' ? '（あなた）' : ''}`}
+          label={`${names.x}${!teamMode && myRole === 'x' ? '（あなた）' : ''}`}
           player="x"
           active={playing && currentTurn === 'x'}
           timed={timed}
+          sub={
+            teamMode && roster ? (
+              <TeamRoster members={roster.x} seats={['x', 'x2']} activeSeat={activeSeat} />
+            ) : undefined
+          }
         />
       </div>
 
@@ -179,8 +205,8 @@ export function HUD(props: HUDProps) {
       {playing && (
         <div className="absolute left-1/2 top-20 -translate-x-1/2 animate-blink font-display text-sm tracking-widest"
           style={{ color: currentTurn === 'o' ? '#F2F2F2' : '#AEB6C6' }}>
-          {TEAM[currentTurn].name} の手番
-          {mode !== 'local' && myRole === currentTurn ? ' — あなた' : ''}
+          {teamMode ? `${activeName}（${TEAM[currentTurn].name}）の手番` : `${activeName} の手番`}
+          {activeIsMe ? ' — あなた' : ''}
         </div>
       )}
 
@@ -344,6 +370,31 @@ function ReplayBtn({
     >
       {children}
     </button>
+  );
+}
+
+/** チーム戦のメンバー名簿（タイマー下に表示。手番のメンバーを強調）。 */
+function TeamRoster({
+  members,
+  seats,
+  activeSeat,
+}: {
+  members: string[];
+  seats: Seat[];
+  activeSeat: Seat;
+}) {
+  return (
+    <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] leading-tight">
+      {members.map((name, i) => (
+        <span
+          key={seats[i]}
+          className={seats[i] === activeSeat ? 'font-bold text-white' : 'text-col-ui/60'}
+        >
+          {seatSuffix[seats[i]]}
+          {name}
+        </span>
+      ))}
+    </div>
   );
 }
 

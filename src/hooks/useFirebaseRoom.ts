@@ -24,14 +24,20 @@ import {
   checkWinAt,
   recordToBoard,
 } from '../lib/gameLogic';
-import { oppositeOf } from '../lib/gameLogic';
 import {
   DEFAULT_TIME_CONTROL,
   isUnlimited,
   normalizeTimeControl,
   resolveStartingPlayer,
 } from '../lib/timeControl';
-import type { Player, RoomData, TimeControl, TurnPref, Winner } from '../types';
+import {
+  nextSeat,
+  prevSeat,
+  requiredSeats,
+  seatTeam,
+  startingSeat,
+} from '../lib/seats';
+import type { Player, RoomData, Seat, TimeControl, TurnPref, Winner } from '../types';
 
 const COUNTDOWN_MS = 3000;
 
@@ -52,16 +58,21 @@ function initialRoom(): RoomData {
     timeControl: DEFAULT_TIME_CONTROL,
     turnPref: 'o',
     score: { o: 0, x: 0 },
+    teamMode: false,
+    currentSeat: FIRST_PLAYER,
   };
 }
 
 export interface UseFirebaseRoomResult {
   room: RoomData | null;
+  /** 自分のチーム（盤の記号）。チーム戦では o2→'o' のように畳まれる。 */
   myRole: Player | null;
+  /** 自分の席（o/x/o2/x2）。canPlace 判定に使う。 */
+  mySeat: Seat | null;
   serverOffset: number;
   error: string | null;
-  /** 新規ルームを作成して o として参加 */
-  createRoom: (timeControl?: TimeControl, turnPref?: TurnPref) => Promise<void>;
+  /** 新規ルームを作成して o（席1）として参加。teamMode=true で 2vs2 チーム戦。 */
+  createRoom: (timeControl?: TimeControl, turnPref?: TurnPref, teamMode?: boolean) => Promise<void>;
   /** 既存ルームに参加（空きスロットを取得） */
   joinRoom: () => Promise<void>;
   /** ロビーから対戦開始（ホストのみ） */
@@ -84,7 +95,8 @@ export function useFirebaseRoom(
   playerName: string,
 ): UseFirebaseRoomResult {
   const [room, setRoom] = useState<RoomData | null>(null);
-  const [myRole, setMyRole] = useState<Player | null>(null);
+  const [mySeat, setMySeat] = useState<Seat | null>(null);
+  const myRole: Player | null = mySeat ? seatTeam(mySeat) : null;
   const [serverOffset, setServerOffset] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
@@ -93,6 +105,8 @@ export function useFirebaseRoom(
   roomRef.current = room;
   const offsetRef = useRef(0);
   offsetRef.current = serverOffset;
+  const mySeatRef = useRef(mySeat);
+  mySeatRef.current = mySeat;
   const myRoleRef = useRef(myRole);
   myRoleRef.current = myRole;
 
@@ -131,23 +145,23 @@ export function useFirebaseRoom(
     return () => unsub();
   }, [roomId, dbRoom]);
 
-  // 自分のスロット(uid)から myRole を確定する。
+  // 自分のスロット(uid)から自席を確定する。
   useEffect(() => {
     if (!roomId || !room) return;
-    let role: Player | null = null;
-    (['o', 'x'] as Player[]).forEach((p) => {
-      if (room.players[p]?.uid === uidRef.current) role = p;
+    let seat: Seat | null = null;
+    (['o', 'x', 'o2', 'x2'] as Seat[]).forEach((s) => {
+      if (room.players[s]?.uid === uidRef.current) seat = s;
     });
-    if (role && role !== myRoleRef.current) setMyRole(role);
+    if (seat && seat !== mySeatRef.current) setMySeat(seat);
   }, [roomId, room]);
 
   // プレゼンス管理: .info/connected を監視し、接続が確立するたびに
   // connected=true を書き、onDisconnect(connected=false) を再設定する。
   // これによりモバイル等で一時的に切断→再接続しても「切断」表示が残らない。
   useEffect(() => {
-    if (!roomId || !myRole) return;
+    if (!roomId || !mySeat) return;
     const connectedRef = ref(getDb(), '.info/connected');
-    const slotConnRef = ref(getDb(), `rooms/${roomId}/players/${myRole}/connected`);
+    const slotConnRef = ref(getDb(), `rooms/${roomId}/players/${mySeat}/connected`);
     const unsub = onValue(connectedRef, (snap) => {
       if (snap.val() !== true) return; // 切断中。再接続時に再びここへ来る。
       // 切断時に connected=false（スロット自体は残し再接続/再戦を可能に）。
@@ -158,13 +172,18 @@ export function useFirebaseRoom(
   }, [roomId, myRole]);
 
   const createRoom = useCallback(
-    async (timeControl: TimeControl = DEFAULT_TIME_CONTROL, turnPref: TurnPref = 'o') => {
+    async (
+      timeControl: TimeControl = DEFAULT_TIME_CONTROL,
+      turnPref: TurnPref = 'o',
+      teamMode = false,
+    ) => {
       if (!roomId) return;
       setError(null);
       const tc = normalizeTimeControl(timeControl);
       const base = initialRoom();
       base.timeControl = tc;
       base.turnPref = turnPref;
+      base.teamMode = teamMode;
       base.players.o = {
         name: playerName || 'O',
         connected: true,
@@ -193,20 +212,19 @@ export function useFirebaseRoom(
       const result = await runTransaction(dbRoom(), (data: RoomData | null) => {
         if (!data) return data;
         const players = data.players || { o: null, x: null };
+        const seats = requiredSeats(data.teamMode);
         // 既に自分のスロットがある（リロード等）なら何もしない。
-        if (players.o?.uid === uidRef.current || players.x?.uid === uidRef.current) {
-          return data;
-        }
-        const slot: Player | null = !players.o ? 'o' : !players.x ? 'x' : null;
+        if (seats.some((s) => players[s]?.uid === uidRef.current)) return data;
+        const slot = seats.find((s) => !players[s]) ?? null;
         if (!slot) return; // 満員 → abort
         players[slot] = {
-          name: playerName || (slot === 'o' ? 'O' : 'X'),
+          name: playerName || slot.toUpperCase(),
           connected: true,
           timeRemaining: normalizeTimeControl(data.timeControl).baseMs,
           uid: uidRef.current,
         };
         data.players = players;
-        // 2人揃っても自動開始せず 'waiting'(ロビー) のまま。ホストの開始操作を待つ。
+        // 定員が揃っても自動開始せず 'waiting'(ロビー) のまま。ホストの開始操作を待つ。
         return data;
       });
       if (!result.committed) {
@@ -225,11 +243,13 @@ export function useFirebaseRoom(
       const cur = roomRef.current;
       if (!cur || cur.status !== 'countdown') return;
       const tc = normalizeTimeControl(cur.timeControl);
+      const startTeam = resolveStartingPlayer(cur.turnPref);
       void update(dbRoom(), {
         status: 'playing',
         turnStartedAt: serverTimestamp(),
-        currentTurn: resolveStartingPlayer(cur.turnPref),
-        // 開始時に両者の持ち時間を確定（ロビーで設定変更されていても整合させる）。
+        currentTurn: startTeam,
+        currentSeat: startingSeat(startTeam),
+        // 開始時に両チームの持ち時間を確定（ロビーで設定変更されていても整合させる）。
         'players/o/timeRemaining': tc.baseMs,
         'players/x/timeRemaining': tc.baseMs,
       });
@@ -241,7 +261,8 @@ export function useFirebaseRoom(
   const startGame = useCallback(() => {
     const cur = roomRef.current;
     if (!roomId || !cur) return;
-    if (!cur.players.o || !cur.players.x) return; // 2人揃うまで開始不可
+    // 必要な席（1vs1=2 / 2vs2=4）が全部埋まるまで開始不可。
+    if (requiredSeats(cur.teamMode).some((s) => !cur.players[s])) return;
     if (cur.status !== 'waiting') return;
     void update(dbRoom(), { status: 'countdown' });
   }, [roomId, dbRoom]);
@@ -279,39 +300,44 @@ export function useFirebaseRoom(
   const place = useCallback(
     (cell: number) => {
       const cur = roomRef.current;
-      const role = myRoleRef.current;
-      if (!roomId || !cur || !role) return;
-      if (cur.status !== 'playing' || cur.winner || cur.currentTurn !== role) return;
-      if (cur.piecesLeft[role] <= 0) return;
+      const seat = mySeatRef.current;
+      if (!roomId || !cur || !seat) return;
+      const team = seatTeam(seat); // 盤に置く記号（チーム）
+      const activeSeat: Seat = cur.currentSeat ?? cur.currentTurn; // 旧ルーム後方互換
+      if (cur.status !== 'playing' || cur.winner || activeSeat !== seat) return;
+      if (cur.piecesLeft[team] <= 0) return;
 
       const now = Date.now() + offsetRef.current;
       const elapsed = Math.max(0, now - cur.turnStartedAt);
-      const slot = cur.players[role];
-      if (!slot) return;
+      // 持ち時間はチーム共有（o/x スロットの値を使う）。
+      const teamSlot = cur.players[team];
+      if (!teamSlot) return;
       const tc = normalizeTimeControl(cur.timeControl);
       const moverRemaining = isUnlimited(tc)
-        ? slot.timeRemaining
-        : slot.timeRemaining - elapsed + tc.incrementMs;
+        ? teamSlot.timeRemaining
+        : teamSlot.timeRemaining - elapsed + tc.incrementMs;
 
-      const board = applyMove(recordToBoard(cur.board), cell, role);
-      const win = checkWinAt(board, cell, role);
-      const piecesLeft = { ...cur.piecesLeft, [role]: cur.piecesLeft[role] - 1 };
+      const board = applyMove(recordToBoard(cur.board), cell, team);
+      const win = checkWinAt(board, cell, team);
+      const piecesLeft = { ...cur.piecesLeft, [team]: cur.piecesLeft[team] - 1 };
 
       // RTDB は null を書かないため、読み戻すと winner が undefined になる。
       // update() は undefined を拒否するので null に正規化する。
       let winner: Winner = cur.winner ?? null;
-      if (win) winner = role;
+      if (win) winner = team;
       else if (piecesLeft.o <= 0 && piecesLeft.x <= 0) winner = 'draw';
 
+      const next = nextSeat(seat, cur.teamMode);
       const updates: Record<string, unknown> = {
         [`board/${cell}`]: board[cell],
-        [`players/${role}/timeRemaining`]: moverRemaining,
-        [`piecesLeft/${role}`]: piecesLeft[role],
-        currentTurn: winner ? role : oppositeOf(role),
+        [`players/${team}/timeRemaining`]: moverRemaining,
+        [`piecesLeft/${team}`]: piecesLeft[team],
+        currentTurn: winner ? team : seatTeam(next),
+        currentSeat: winner ? seat : next,
         turnStartedAt: serverTimestamp(),
         winner: winner ?? null,
         status: winner ? 'finished' : 'playing',
-        lastMove: { cell, player: role }, // 待った用の巻き戻し情報
+        lastMove: { cell, player: team }, // 待った用の巻き戻し情報
         undo: null, // 着手したら保留中の待った申請は無効化（暗黙の却下）
       };
       // 4連での勝利は room スコアを権威的に+1（引き分けは加算なし）。
@@ -352,7 +378,9 @@ export function useFirebaseRoom(
             else delete board[String(lm.cell)];
             data.board = Object.keys(board).length > 0 ? board : null;
             data.piecesLeft[lm.player] = (data.piecesLeft[lm.player] ?? 0) + 1;
-            data.currentTurn = lm.player; // 手番を申請者へ戻す
+            // 手番を直前に指した席へ戻す（1vs1 は席=チーム。チーム戦も prevSeat で復元）。
+            data.currentSeat = prevSeat((data.currentSeat ?? data.currentTurn) as Seat, data.teamMode);
+            data.currentTurn = lm.player;
             data.turnStartedAt = Date.now() + offset; // 申請者の手番として時計を再始動
             data.winner = null;
             data.status = 'playing';
@@ -397,9 +425,11 @@ export function useFirebaseRoom(
         data.piecesLeft = { o: INITIAL_PIECES, x: INITIAL_PIECES };
         data.winner = null;
         data.currentTurn = FIRST_PLAYER;
+        data.currentSeat = FIRST_PLAYER;
         data.turnStartedAt = 0;
         data.status = 'countdown';
         data.rematch = {};
+        data.lastMove = null;
         if (data.players.o) data.players.o.timeRemaining = tc.baseMs;
         if (data.players.x) data.players.x.timeRemaining = tc.baseMs;
       }
@@ -410,6 +440,7 @@ export function useFirebaseRoom(
   return {
     room,
     myRole,
+    mySeat,
     serverOffset,
     error,
     createRoom,

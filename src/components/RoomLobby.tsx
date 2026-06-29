@@ -1,9 +1,10 @@
 // モード選択と、オンライン対戦の待機ロビー。
 
 import { useEffect, useRef, useState } from 'react';
-import type { AiLevel, Player, RoomData, TimeControl, TurnPref } from '../types';
+import type { AiLevel, Player, RoomData, Seat, TimeControl, TurnPref } from '../types';
 import { isFirebaseConfigured } from '../lib/firebase';
-import { AI_LEVEL_LABEL } from '../lib/teams';
+import { AI_LEVEL_LABEL, TEAM } from '../lib/teams';
+import { requiredSeats, seatTeam, seatSuffix } from '../lib/seats';
 import {
   BASE_PRESETS,
   INCREMENT_PRESETS,
@@ -18,6 +19,8 @@ export interface WaitingState {
   shareUrl: string;
   room: RoomData | null;
   myRole: Player | null;
+  /** 自分の席（o/x/o2/x2）。チーム戦の名前ラベル・ホスト判定に使う */
+  mySeat: Seat | null;
   error: string | null;
   /** リンク経由の参加者か（招待された側） */
   isGuest: boolean;
@@ -35,7 +38,8 @@ interface RoomLobbyProps {
   onChangeSettings: (tc: TimeControl, pref: TurnPref) => void;
   onLocal: () => void;
   onAI: (side: Player, level: AiLevel) => void;
-  onCreateRoom: () => void;
+  /** オンラインルーム作成。teamMode=true で 2vs2 チーム戦 */
+  onCreateRoom: (teamMode: boolean) => void;
   waiting: WaitingState | null;
   onStartGame: () => void;
   onLeave: () => void;
@@ -58,6 +62,7 @@ export function RoomLobby({
   const [aiSide, setAiSide] = useState<TurnPref>('o');
   const [aiLevel, setAiLevel] = useState<AiLevel>('normal');
   const [copied, setCopied] = useState(false);
+  const [createTeamMode, setCreateTeamMode] = useState(false); // 1vs1 / 2vs2 切替（作成時）
 
   // AI参戦時に side(先攻/後攻/ランダム)を実プレイヤーへ解決。
   const startAI = () => {
@@ -66,16 +71,16 @@ export function RoomLobby({
   };
 
   // 待機ロビーでの自分の表示名。Firebase 上のスロット名から一度だけ初期化する。
-  const myRole = waiting?.myRole ?? null;
-  const mySlotName = myRole ? waiting?.room?.players[myRole]?.name ?? '' : '';
+  const mySeat = waiting?.mySeat ?? null;
+  const mySlotName = mySeat ? waiting?.room?.players[mySeat]?.name ?? '' : '';
   const [nameDraft, setNameDraft] = useState('');
   const seeded = useRef(false);
   useEffect(() => {
-    if (!seeded.current && myRole && mySlotName) {
+    if (!seeded.current && mySeat && mySlotName) {
       setNameDraft(mySlotName);
       seeded.current = true;
     }
-  }, [myRole, mySlotName]);
+  }, [mySeat, mySlotName]);
 
   const copy = async () => {
     if (!waiting) return;
@@ -89,23 +94,34 @@ export function RoomLobby({
   };
 
   if (waiting) {
-    const bothJoined = Boolean(waiting.room?.players.o && waiting.room?.players.x);
-    const isHost = waiting.myRole === 'o';
+    const teamMode = Boolean(waiting.room?.teamMode);
+    const need = requiredSeats(waiting.room?.teamMode);
+    const allJoined = need.every((s) => waiting.room?.players[s]);
+    const isHost = waiting.mySeat === 'o';
     const roomTc = normalizeTimeControl(waiting.room?.timeControl);
     const roomPref: TurnPref = waiting.room?.turnPref ?? 'o';
+    const myTeam = mySeat ? seatTeam(mySeat) : null;
+    const myLabel = mySeat
+      ? teamMode
+        ? `${TEAM[myTeam!].name} 陣営 ${seatSuffix[mySeat]}`
+        : mySeat === 'o'
+          ? 'ORIGIN・先攻'
+          : 'XENOGENESIS・後攻'
+      : '';
     return (
       <Shell>
         <h2 className="font-display text-2xl text-white">
-          {bothJoined ? '対戦ロビー' : '対戦相手を待っています'}
+          {allJoined ? '対戦ロビー' : `メンバーを待っています（${need.filter((s) => waiting.room?.players[s]).length}/${need.length}）`}
         </h2>
         <p className="text-sm text-col-ui">
-          ルームID: <span className="font-mono text-white">{waiting.roomId}</span>
+          {teamMode ? '2vs2 チーム戦' : '1vs1'} ・ ルームID:{' '}
+          <span className="font-mono text-white">{waiting.roomId}</span>
         </p>
 
-        {waiting.myRole && (
+        {mySeat && (
           <div className="w-full">
             <label className="mb-1 block text-xs uppercase tracking-wider text-col-ui">
-              あなたの名前（{waiting.myRole === 'o' ? 'ORIGIN・先攻' : 'XENOGENESIS・後攻'}）
+              あなたの名前（{myLabel}）
             </label>
             <input
               value={nameDraft}
@@ -114,7 +130,7 @@ export function RoomLobby({
                 onChangeName(e.target.value);
               }}
               maxLength={16}
-              placeholder={waiting.myRole === 'o' ? 'O' : 'X'}
+              placeholder={mySeat.toUpperCase()}
               className="w-full rounded-md border border-col-border bg-bg-void px-3 py-2 text-white outline-none focus:border-col-gold/60"
             />
           </div>
@@ -139,10 +155,33 @@ export function RoomLobby({
           </div>
         )}
 
-        <div className="flex w-full justify-between gap-3">
-          <SlotCard label="ORIGIN（O・白・先攻）" name={waiting.room?.players.o?.name} ready={!!waiting.room?.players.o} />
-          <SlotCard label="XENOGENESIS（X・黒・後攻）" name={waiting.room?.players.x?.name} ready={!!waiting.room?.players.x} />
-        </div>
+        {teamMode ? (
+          <div className="flex w-full gap-3">
+            <div className="flex-1 rounded-lg border border-col-o/30 p-2">
+              <div className="mb-1.5 text-center text-[10px] uppercase tracking-wider text-col-o">
+                ORIGIN 陣営
+              </div>
+              <div className="flex flex-col gap-2">
+                <SlotCard label="①" name={waiting.room?.players.o?.name} ready={!!waiting.room?.players.o} />
+                <SlotCard label="②" name={waiting.room?.players.o2?.name} ready={!!waiting.room?.players.o2} />
+              </div>
+            </div>
+            <div className="flex-1 rounded-lg border border-col-x/30 p-2">
+              <div className="mb-1.5 text-center text-[10px] uppercase tracking-wider text-col-x">
+                XENOGENESIS 陣営
+              </div>
+              <div className="flex flex-col gap-2">
+                <SlotCard label="①" name={waiting.room?.players.x?.name} ready={!!waiting.room?.players.x} />
+                <SlotCard label="②" name={waiting.room?.players.x2?.name} ready={!!waiting.room?.players.x2} />
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="flex w-full justify-between gap-3">
+            <SlotCard label="ORIGIN（O・白・先攻）" name={waiting.room?.players.o?.name} ready={!!waiting.room?.players.o} />
+            <SlotCard label="XENOGENESIS（X・黒・後攻）" name={waiting.room?.players.x?.name} ready={!!waiting.room?.players.x} />
+          </div>
+        )}
 
         {/* ルーム設定（ホストのみ編集可・待機中） */}
         <div className="w-full rounded-lg border border-col-border bg-bg-void/40 px-3 py-3 text-xs text-col-ui">
@@ -164,7 +203,7 @@ export function RoomLobby({
           )}
         </div>
 
-        {bothJoined ? (
+        {allJoined ? (
           isHost ? (
             <button
               onClick={onStartGame}
@@ -176,7 +215,11 @@ export function RoomLobby({
             <p className="animate-blink text-sm text-col-ui">ホストの開始を待っています…</p>
           )
         ) : (
-          <p className="text-sm text-col-ui">相手がリンクを開くと、ここに表示されます。</p>
+          <p className="text-sm text-col-ui">
+            {teamMode
+              ? '招待リンクを3人に共有してください。4人揃うと開始できます。'
+              : '相手がリンクを開くと、ここに表示されます。'}
+          </p>
         )}
         {waiting.error && <p className="text-sm text-[#E84040]">{waiting.error}</p>}
 
@@ -222,18 +265,35 @@ export function RoomLobby({
       </div>
 
       <div className="flex w-full flex-col gap-3">
-        <button
-          onClick={onCreateRoom}
-          disabled={!isFirebaseConfigured}
-          className="rounded-lg border border-col-gold/50 bg-bg-surface px-5 py-4 text-left transition-colors hover:bg-col-gold/10 disabled:cursor-not-allowed disabled:opacity-40"
-        >
+        <div className="rounded-lg border border-col-gold/50 bg-bg-surface px-5 py-4">
           <div className="font-display text-lg text-white">オンライン対戦</div>
           <div className="text-xs text-col-ui">
             {isFirebaseConfigured
               ? 'ルームを作成して友人を招待'
               : 'Firebase未設定（.env を設定すると有効化）'}
           </div>
-        </button>
+          {isFirebaseConfigured && (
+            <>
+              <div className="mt-3 flex overflow-hidden rounded-md border border-col-border text-xs">
+                {([false, true] as const).map((tm) => (
+                  <button
+                    key={String(tm)}
+                    onClick={() => setCreateTeamMode(tm)}
+                    className={`flex-1 py-1.5 ${createTeamMode === tm ? 'bg-col-gold/20 text-white' : 'text-col-ui'}`}
+                  >
+                    {tm ? '2vs2 チーム戦' : '1vs1'}
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => onCreateRoom(createTeamMode)}
+                className="mt-3 w-full rounded-md border border-col-gold/50 bg-bg-void py-2 text-sm text-white hover:bg-col-gold/10"
+              >
+                {createTeamMode ? '2vs2 ルームを作成（4人）' : 'ルームを作成して招待'}
+              </button>
+            </>
+          )}
+        </div>
 
         <button
           onClick={onLocal}

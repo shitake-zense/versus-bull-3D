@@ -1,7 +1,7 @@
 // 画面遷移と各モードの統合。menu ↔ game を切り替え、ローカル/AI と オンライン の状態源を束ねる。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { AiLevel, GameMode, Move, Player, TimeControl } from './types';
+import type { AiLevel, GameMode, Move, Player, Seat, TimeControl } from './types';
 import {
   applyMove,
   boardFromMoves,
@@ -10,6 +10,7 @@ import {
   recordToBoard,
   scanWin,
 } from './lib/gameLogic';
+import { requiredSeats } from './lib/seats';
 import { DEFAULT_TIME_CONTROL, isUnlimited, normalizeTimeControl } from './lib/timeControl';
 import { generateRoomId } from './lib/roomId';
 import { AI_LEVEL_LABEL, TEAM } from './lib/teams';
@@ -36,6 +37,7 @@ export default function App() {
   const [roomId, setRoomId] = useState<string | null>(null);
   const [intent, setIntent] = useState<Intent>(null);
   const [isGuest, setIsGuest] = useState(false);
+  const [pendingTeamMode, setPendingTeamMode] = useState(false); // オンライン作成時の 2vs2 チーム戦フラグ
 
   const [pendingView, setPendingView] = useState<CameraView | null>(null);
   const [showThreats, setShowThreats] = useState(false);
@@ -67,10 +69,10 @@ export default function App() {
   // ---- create / join の実行 ----
   useEffect(() => {
     if (!isOnline || !roomId || !intent) return;
-    if (intent === 'create') void fb.createRoom(timeControl, 'o');
+    if (intent === 'create') void fb.createRoom(timeControl, 'o', pendingTeamMode);
     else void fb.joinRoom();
     setIntent(null);
-  }, [isOnline, roomId, intent, fb, timeControl]);
+  }, [isOnline, roomId, intent, fb, timeControl, pendingTeamMode]);
 
   // ---- 派生状態（モード非依存ビュー） ----
   const status = isOnline
@@ -339,8 +341,9 @@ export default function App() {
     return `${origin}${pathname}?room=${roomId}`;
   }, [roomId]);
 
-  const createRoom = useCallback(() => {
+  const createRoom = useCallback((team = false) => {
     const id = generateRoomId();
+    setPendingTeamMode(team);
     setRoomId(id);
     setMode('online');
     setIsGuest(false);
@@ -378,9 +381,11 @@ export default function App() {
   // ---- 待った（手戻し）----
   const undoRequest = isOnline ? room?.undo ?? null : null;
   // 待った可否: ローカル/AI は即時、オンラインは「自分の直前手がある（＝今は相手番）」かつ申請が無いとき。
+  // チーム戦(2vs2)は巻き戻し席の特定が複雑なため当面オフ。
   const canTakeBack = isOnline
     ? Boolean(
         running &&
+          !room?.teamMode &&
           fb.myRole &&
           room?.lastMove?.player === fb.myRole &&
           room?.currentTurn !== fb.myRole &&
@@ -413,9 +418,20 @@ export default function App() {
   const showLobby = mode === null || (isOnline && (!room || room.status === 'waiting'));
 
   const myRole: Player | null = isOnline ? fb.myRole : mode === 'ai' ? offline.humanPlayer : null;
+  const teamMode = isOnline && Boolean(room?.teamMode);
+  // 今この手を指す席（チーム戦のどちらが指すか）。旧ルーム/1vs1 は currentTurn と同じ。
+  const activeSeat: Seat = isOnline ? room?.currentSeat ?? activePlayer : activePlayer;
+
+  // 席→表示名（チーム戦のメンバー名・「あなた」判定に使う）。
+  const seatName = useCallback(
+    (seat: Seat): string => room?.players[seat]?.name || seat.toUpperCase(),
+    [room?.players],
+  );
 
   const names = useMemo(() => {
     if (isOnline) {
+      // チーム戦はタイマー等の見出しをチーム名にする（メンバーは roster で別途表示）。
+      if (teamMode) return { o: TEAM.o.name, x: TEAM.x.name };
       return {
         o: room?.players.o?.name || TEAM.o.name,
         x: room?.players.x?.name || TEAM.x.name,
@@ -429,16 +445,38 @@ export default function App() {
       return human === 'o' ? { o: youName, x: cpuName } : { o: cpuName, x: youName };
     }
     return { o: TEAM.o.name, x: TEAM.x.name };
-  }, [isOnline, room?.players, mode, playerName, aiLevel, offline.humanPlayer, offline.aiPlayer]);
+  }, [isOnline, teamMode, room?.players, mode, playerName, aiLevel, offline.humanPlayer, offline.aiPlayer]);
 
-  const canPlace = isOnline ? running && fb.myRole === activePlayer : offline.canHumanPlace;
+  // チーム戦のメンバー名簿（手番ハイライト用）。
+  const roster = useMemo(
+    () =>
+      teamMode
+        ? { o: [seatName('o'), seatName('o2')], x: [seatName('x'), seatName('x2')] }
+        : null,
+    [teamMode, seatName],
+  );
 
+  // 手番の人の表示名と、それが自分か。
+  const activeName = isOnline
+    ? teamMode
+      ? seatName(activeSeat)
+      : room?.players[activePlayer]?.name || TEAM[activePlayer].name
+    : names[activePlayer];
+  const activeIsMe = isOnline
+    ? teamMode
+      ? fb.mySeat === activeSeat
+      : fb.myRole === activePlayer
+    : mode === 'ai' && offline.humanPlayer === activePlayer;
+
+  const canPlace = isOnline ? running && fb.mySeat === activeSeat : offline.canHumanPlace;
+
+  // 自分以外の必要席のいずれかが切断していれば「切断」表示（チーム戦も対応）。
   const disconnected = Boolean(
     isOnline &&
-      room?.players.o &&
-      room?.players.x &&
-      ((fb.myRole === 'o' && room.players.x?.connected === false) ||
-        (fb.myRole === 'x' && room.players.o?.connected === false)),
+      requiredSeats(room?.teamMode).every((s) => room?.players[s]) &&
+      requiredSeats(room?.teamMode).some(
+        (s) => s !== fb.mySeat && room?.players[s]?.connected === false,
+      ),
   );
 
   const rematchPending = Boolean(
@@ -447,7 +485,7 @@ export default function App() {
 
   const waiting: WaitingState | null =
     isOnline && roomId
-      ? { roomId, shareUrl, room, myRole: fb.myRole, error: fb.error, isGuest }
+      ? { roomId, shareUrl, room, myRole: fb.myRole, mySeat: fb.mySeat, error: fb.error, isGuest }
       : null;
 
   return (
@@ -476,6 +514,11 @@ export default function App() {
           score={isOnline ? onlineScore : offline.score}
           winner={winner}
           myRole={myRole}
+          teamMode={teamMode}
+          roster={roster}
+          activeName={activeName}
+          activeIsMe={activeIsMe}
+          activeSeat={activeSeat}
           countdown={countdown}
           disconnected={disconnected}
           showThreats={showThreats}

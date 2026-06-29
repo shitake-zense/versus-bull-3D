@@ -1,5 +1,7 @@
 // フィッシャークロック表示。残り30秒を切ると赤く脈動する。
 
+import type { ReactNode } from 'react';
+
 interface TimerDisplayProps {
   ms: number;
   label: string;
@@ -7,6 +9,8 @@ interface TimerDisplayProps {
   active: boolean;
   /** 持ち時間制か。false（無制限）なら ∞ を表示し赤脈動しない */
   timed?: boolean;
+  /** タイマー下の補助表示（チーム戦のメンバー名簿など） */
+  sub?: ReactNode;
 }
 
 const LOW_TIME_MS = 30_000;
@@ -24,7 +28,7 @@ function format(ms: number): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-export function TimerDisplay({ ms, label, player, active, timed = true }: TimerDisplayProps) {
+export function TimerDisplay({ ms, label, player, active, timed = true, sub }: TimerDisplayProps) {
   const low = timed && ms < LOW_TIME_MS;
   // O=白, X=黒（UIでは視認性のため明スレートで表現）
   const accent = player === 'o' ? '#F2F2F2' : '#AEB6C6';
@@ -51,6 +55,7 @@ export function TimerDisplay({ ms, label, player, active, timed = true }: TimerD
       >
         {timed ? format(ms) : '∞'}
       </div>
+      {sub}
     </div>
   );
 }

@@ -3,6 +3,12 @@
 
 export type Player = 'o' | 'x';
 
+/**
+ * 着席位置。1vs1 は o/x の2席。2vs2 チーム戦は o/o2（ORIGIN陣営）と x/x2（XENO陣営）の4席。
+ * 盤の記号・勝敗はチーム（= Player）単位なので seatTeam() で o/x へ畳む。
+ */
+export type Seat = 'o' | 'x' | 'o2' | 'x2';
+
 /** 1マスのスタック。配列の先頭が最下層、末尾が最上層。 */
 export type Cell = Player[];
 
@@ -68,13 +74,24 @@ export interface GameState {
 /** Firebase /rooms/{roomId} のスキーマ */
 export interface RoomData {
   status: RoomStatus;
+  /**
+   * 着席スロット。o/x は常に存在（1vs1 もこれだけ）。o2/x2 は 2vs2 チーム戦のみ。
+   * 持ち時間（timeRemaining）はチーム単位なので o/x スロットのものだけを使い、o2/x2 の値は無視する。
+   */
   players: {
     o: PlayerSlot | null;
     x: PlayerSlot | null;
+    o2?: PlayerSlot | null;
+    x2?: PlayerSlot | null;
   };
+  /** 2vs2 チーム戦か（未設定/false は 1vs1） */
+  teamMode?: boolean;
   /** { [cellIndex]: Player[] }。空マスはキー自体が無い場合がある。 */
   board: Record<string, Player[]> | null;
+  /** 盤に置くチーム（記号）。毎手 o↔x で交互。 */
   currentTurn: Player;
+  /** 今この手を指す席。チーム戦で「同チームのどちらが指すか」を表す（未設定は currentTurn と同じ） */
+  currentSeat?: Seat;
   /** 現在の手番が始まったサーバー時刻(ms)。タイマー計算の基準。 */
   turnStartedAt: number;
   piecesLeft: { o: number; x: number };
