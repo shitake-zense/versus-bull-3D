@@ -1,7 +1,7 @@
 // 画面遷移と各モードの統合。menu ↔ game を切り替え、ローカル/AI と オンライン の状態源を束ねる。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { AiLevel, GameMode, Move, Player, TimeControl, Winner } from './types';
+import type { AiLevel, GameMode, Move, Player, TimeControl } from './types';
 import {
   applyMove,
   boardFromMoves,
@@ -287,23 +287,13 @@ export default function App() {
     setReplayPlaying(true);
   }, [replayPlaying, replayIndex, moveHistory.length]);
 
-  // ---- オンラインのセッションスコア（offline.score はオフライン専用） ----
-  const [onlineScore, setOnlineScore] = useState<Record<Player, number>>({ o: 0, x: 0 });
-  const lastWinnerRef = useRef<Winner>(null);
-  useEffect(() => {
-    if (!isOnline) {
-      lastWinnerRef.current = null;
-      return;
-    }
-    if (winner && winner !== lastWinnerRef.current) {
-      if (winner === 'o' || winner === 'timeout_x') {
-        setOnlineScore((s) => ({ ...s, o: s.o + 1 }));
-      } else if (winner === 'x' || winner === 'timeout_o') {
-        setOnlineScore((s) => ({ ...s, x: s.x + 1 }));
-      }
-    }
-    lastWinnerRef.current = winner;
-  }, [isOnline, winner]);
+  // ---- オンラインのセッションスコア（room で一元管理＝両クライアントで一致） ----
+  // 旧: 各クライアントが winner からローカル集計 → 再接続/観測漏れでホストとゲストがズレた。
+  // 新: useFirebaseRoom が勝利確定時に room.score を権威的に+1し、ここは購読するだけ。
+  const onlineScore = useMemo<Record<Player, number>>(
+    () => ({ o: room?.score?.o ?? 0, x: room?.score?.x ?? 0 }),
+    [room?.score?.o, room?.score?.x],
+  );
 
   // ---- キーボード（カメラ 1/2/3） & ダブルクリックでデフォルト視点 ----
   useEffect(() => {

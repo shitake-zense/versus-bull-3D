@@ -51,6 +51,7 @@ function initialRoom(): RoomData {
     createdAt: Date.now(),
     timeControl: DEFAULT_TIME_CONTROL,
     turnPref: 'o',
+    score: { o: 0, x: 0 },
   };
 }
 
@@ -313,6 +314,10 @@ export function useFirebaseRoom(
         lastMove: { cell, player: role }, // 待った用の巻き戻し情報
         undo: null, // 着手したら保留中の待った申請は無効化（暗黙の却下）
       };
+      // 4連での勝利は room スコアを権威的に+1（引き分けは加算なし）。
+      if (winner === 'o' || winner === 'x') {
+        updates[`score/${winner}`] = (cur.score?.[winner] ?? 0) + 1;
+      }
       void update(dbRoom(), updates);
     },
     [roomId, dbRoom],
@@ -368,6 +373,10 @@ export function useFirebaseRoom(
         if (!data || data.winner || data.status === 'finished') return data;
         data.winner = player === 'o' ? 'timeout_o' : 'timeout_x';
         data.status = 'finished';
+        // 時間切れの勝者（切れた側の相手）を room スコアに+1。
+        const w: Player = player === 'o' ? 'x' : 'o';
+        data.score = data.score || { o: 0, x: 0 };
+        data.score[w] = (data.score[w] ?? 0) + 1;
         return data;
       });
     },

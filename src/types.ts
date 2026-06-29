@@ -86,6 +86,8 @@ export interface RoomData {
   timeControl?: TimeControl;
   /** 先手の希望（ホスト視点。o=ホスト先攻 / x=ホスト後攻 / random）。開始時に解決 */
   turnPref?: TurnPref;
+  /** セッション通算スコア（room で一元管理。再戦で伸び、両クライアントで一致する） */
+  score?: { o: number; x: number };
   /** 直前の着手（待った＝undo の巻き戻しに使用） */
   lastMove?: Move | null;
   /** 待った（手戻し）申請。承認制：by=申請者、相手の承認で成立する */
