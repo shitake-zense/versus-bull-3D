@@ -1,8 +1,15 @@
 // 画面遷移と各モードの統合。menu ↔ game を切り替え、ローカル/AI と オンライン の状態源を束ねる。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { AiLevel, GameMode, Player, TimeControl, Winner } from './types';
-import { applyMove, checkWinAt, oppositeOf, recordToBoard, scanWin } from './lib/gameLogic';
+import type { AiLevel, GameMode, Move, Player, TimeControl, Winner } from './types';
+import {
+  applyMove,
+  boardFromMoves,
+  checkWinAt,
+  oppositeOf,
+  recordToBoard,
+  scanWin,
+} from './lib/gameLogic';
 import { DEFAULT_TIME_CONTROL, isUnlimited, normalizeTimeControl } from './lib/timeControl';
 import { generateRoomId } from './lib/roomId';
 import { AI_LEVEL_LABEL, TEAM } from './lib/teams';
@@ -31,9 +38,13 @@ export default function App() {
   const [isGuest, setIsGuest] = useState(false);
 
   const [pendingView, setPendingView] = useState<CameraView | null>(null);
-  const [showThreats, setShowThreats] = useState(true);
+  const [showThreats, setShowThreats] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [offlineCountingDown, setOfflineCountingDown] = useState(false);
+
+  // リプレイ: replayIndex=null は通常表示。数値なら棋譜を先頭から replayIndex 手だけ再現する。
+  const [replayIndex, setReplayIndex] = useState<number | null>(null);
+  const [replayPlaying, setReplayPlaying] = useState(false);
 
   const offline = useGameLogic({ mode: mode ?? 'local', aiPlayer, aiLevel, timeControl });
   const fb = useFirebaseRoom(mode === 'online' ? roomId : null, playerName);
@@ -172,25 +183,38 @@ export default function App() {
     }
   }, [isOnline, status, runCountdown]);
 
-  // ---- 効果音＋直前着手の検知（盤面のピース増加で検知＝ローカル/リモート/AI 共通） ----
+  // ---- 効果音＋直前着手の検知＋棋譜蓄積（盤面のピース増加で検知＝ローカル/リモート/AI 共通） ----
   const totalPieces = board.reduce((a, c) => a + c.length, 0);
   const prevTotal = useRef(0);
   const prevBoard = useRef<typeof board>(board);
   const [lastMove, setLastMove] = useState<{ cell: number; layer: number } | null>(null);
+  const [moveHistory, setMoveHistory] = useState<Move[]>([]);
   useEffect(() => {
     const prev = prevBoard.current;
     if (totalPieces > prevTotal.current) {
       playPlace();
-      // 増えたマスを直前の着手として強調する。
+      // 増えたピースを着手順（下→上）に拾い、直前手の強調と棋譜へ反映する。
+      const added: Move[] = [];
       for (let c = 0; c < board.length; c++) {
-        if (board[c].length > (prev[c]?.length ?? 0)) {
-          setLastMove({ cell: c, layer: board[c].length - 1 });
-          break;
-        }
+        const prevLen = prev[c]?.length ?? 0;
+        for (let l = prevLen; l < board[c].length; l++) added.push({ cell: c, player: board[c][l] });
+      }
+      if (added.length > 0) {
+        const last = added[added.length - 1];
+        setLastMove({ cell: last.cell, layer: board[last.cell].length - 1 });
+        setMoveHistory((h) => [...h, ...added]);
       }
     } else if (totalPieces < prevTotal.current) {
-      // 新規対局・再戦などで盤面がリセットされたらマーカーを消す。
       setLastMove(null);
+      if (totalPieces === 0) {
+        // 新規対局・再戦などで盤面がリセットされたら棋譜・リプレイを消す。
+        setMoveHistory([]);
+        setReplayIndex(null);
+        setReplayPlaying(false);
+      } else {
+        // 待った（手戻し）: 棋譜は残った手数まで切り詰める（プレフィックスなので安全）。
+        setMoveHistory((h) => h.slice(0, totalPieces));
+      }
     }
     prevTotal.current = totalPieces;
     prevBoard.current = board;
@@ -199,6 +223,69 @@ export default function App() {
   useEffect(() => {
     if (winner === 'o' || winner === 'x') playWin();
   }, [winner, playWin]);
+
+  // ---- リプレイの表示用ビュー（replayIndex が立っている間は棋譜から盤面を再現） ----
+  const isReplaying = replayIndex !== null;
+  const viewBoard = useMemo(
+    () => (replayIndex !== null ? boardFromMoves(moveHistory, replayIndex) : board),
+    [replayIndex, moveHistory, board],
+  );
+  const viewLastMove = useMemo(() => {
+    if (replayIndex === null) return lastMove;
+    if (replayIndex <= 0) return null;
+    const m = moveHistory[replayIndex - 1];
+    return { cell: m.cell, layer: viewBoard[m.cell].length - 1 };
+  }, [replayIndex, moveHistory, viewBoard, lastMove]);
+  // 勝利ラインは最終局面でのみ表示（途中局面ではまだ揃っていない）。
+  const viewWinLine = isReplaying && replayIndex < moveHistory.length ? null : winLine;
+  const viewThreats = isReplaying ? [] : showThreats ? threats : [];
+
+  // リプレイ自動再生: 700ms ごとに1手進め、末尾で停止。
+  useEffect(() => {
+    if (!replayPlaying || replayIndex === null) return;
+    if (replayIndex >= moveHistory.length) {
+      setReplayPlaying(false);
+      return;
+    }
+    const t = window.setTimeout(() => {
+      setReplayIndex((i) => (i === null ? i : Math.min(moveHistory.length, i + 1)));
+    }, 700);
+    return () => window.clearTimeout(t);
+  }, [replayPlaying, replayIndex, moveHistory.length]);
+
+  const enterReplay = useCallback(() => {
+    setReplayIndex(moveHistory.length); // 最終局面から開始
+    setReplayPlaying(false);
+  }, [moveHistory.length]);
+  const exitReplay = useCallback(() => {
+    setReplayIndex(null);
+    setReplayPlaying(false);
+  }, []);
+  const replaySeek = useCallback(
+    (i: number) => {
+      setReplayPlaying(false);
+      setReplayIndex(Math.max(0, Math.min(moveHistory.length, i)));
+    },
+    [moveHistory.length],
+  );
+  const replayStep = useCallback(
+    (delta: number) => {
+      setReplayPlaying(false);
+      setReplayIndex((i) =>
+        i === null ? i : Math.max(0, Math.min(moveHistory.length, i + delta)),
+      );
+    },
+    [moveHistory.length],
+  );
+  const replayPlayToggle = useCallback(() => {
+    if (replayPlaying) {
+      setReplayPlaying(false);
+      return;
+    }
+    // 末尾で再生を押したら先頭から再生し直す。
+    if (replayIndex !== null && replayIndex >= moveHistory.length) setReplayIndex(0);
+    setReplayPlaying(true);
+  }, [replayPlaying, replayIndex, moveHistory.length]);
 
   // ---- オンラインのセッションスコア（offline.score はオフライン専用） ----
   const [onlineScore, setOnlineScore] = useState<Record<Player, number>>({ o: 0, x: 0 });
@@ -298,6 +385,31 @@ export default function App() {
     [isOnline, fb, offline],
   );
 
+  // ---- 待った（手戻し）----
+  const undoRequest = isOnline ? room?.undo ?? null : null;
+  // 待った可否: ローカル/AI は即時、オンラインは「自分の直前手がある（＝今は相手番）」かつ申請が無いとき。
+  const canTakeBack = isOnline
+    ? Boolean(
+        running &&
+          fb.myRole &&
+          room?.lastMove?.player === fb.myRole &&
+          room?.currentTurn !== fb.myRole &&
+          !undoRequest,
+      )
+    : offline.canUndo;
+
+  const takeBack = useCallback(() => {
+    if (isOnline) fb.requestUndo();
+    else offline.undo();
+  }, [isOnline, fb, offline]);
+
+  const respondUndo = useCallback(
+    (accept: boolean) => {
+      if (isOnline) fb.respondUndo(accept);
+    },
+    [isOnline, fb],
+  );
+
   // ロビーでの名前変更（オンラインは自分のスロットへ即時反映）。
   const handleChangeName = useCallback(
     (name: string) => {
@@ -351,12 +463,12 @@ export default function App() {
   return (
     <div className="relative h-full w-full overflow-hidden bg-bg-void">
       <Scene3D
-        board={board}
-        winLine={winLine}
-        canPlace={canPlace}
+        board={viewBoard}
+        winLine={viewWinLine}
+        canPlace={canPlace && !isReplaying}
         currentTurn={activePlayer}
-        lastMove={lastMove}
-        threats={showThreats ? threats : []}
+        lastMove={viewLastMove}
+        threats={viewThreats}
         pendingView={pendingView}
         onViewConsumed={() => setPendingView(null)}
         onCellClick={place}
@@ -382,6 +494,19 @@ export default function App() {
           onRematch={handleRematch}
           onExit={exitToMenu}
           rematchPending={rematchPending}
+          canTakeBack={canTakeBack}
+          onTakeBack={takeBack}
+          undoRequest={undoRequest}
+          onRespondUndo={respondUndo}
+          reviewing={isReplaying}
+          replayIndex={replayIndex ?? 0}
+          replayTotal={moveHistory.length}
+          replayPlaying={replayPlaying}
+          onReviewEnter={enterReplay}
+          onReviewExit={exitReplay}
+          onReplaySeek={replaySeek}
+          onReplayStep={replayStep}
+          onReplayPlayToggle={replayPlayToggle}
         />
       )}
 

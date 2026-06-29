@@ -62,6 +62,10 @@ export function useGameLogic({
   tcRef.current = timeControl;
   const [running, setRunning] = useState(false);
   const [score, setScore] = useState<Record<Player, number>>({ o: 0, x: 0 });
+  // 待った（手戻し）用: 各着手の「直前」の状態スナップショットを積む。
+  const [history, setHistory] = useState<LocalState[]>([]);
+  const historyRef = useRef(history);
+  historyRef.current = history;
 
   const sRef = useRef(s);
   sRef.current = s;
@@ -115,6 +119,7 @@ export function useGameLogic({
         winner = 'draw';
       }
 
+      setHistory((h) => [...h, prev]); // 着手前の状態を保存（待った用）
       setS({
         board,
         piecesLeft,
@@ -129,6 +134,38 @@ export function useGameLogic({
     },
     [running, finish],
   );
+
+  /**
+   * 待った（手戻し）。ローカルは直前1手、AIは「自分（人間）の手番」まで巻き戻す
+   * （AIの手＋自分の手の2手）。巻き戻し先の残り時間を復元し、手番を再開する。
+   */
+  const undo = useCallback(() => {
+    const hist = historyRef.current;
+    if (hist.length === 0) return;
+    let idx = hist.length - 1;
+    if (mode === 'ai') {
+      idx = -1;
+      for (let i = hist.length - 1; i >= 0; i--) {
+        if (hist[i].currentTurn === humanPlayer) {
+          idx = i;
+          break;
+        }
+      }
+      if (idx < 0) idx = 0;
+    }
+    const target = hist[idx];
+    setHistory(hist.slice(0, idx));
+    setS({ ...target, winner: null, winLine: null, turnStartedAt: Date.now() });
+    setRunning(true);
+  }, [mode, humanPlayer]);
+
+  const canUndo = useMemo(() => {
+    if (!running || s.winner) return false;
+    if (mode === 'ai') {
+      return s.currentTurn === humanPlayer && history.some((h) => h.currentTurn === humanPlayer);
+    }
+    return history.length >= 1;
+  }, [running, s.winner, s.currentTurn, mode, humanPlayer, history]);
 
   const handleTimeout = useCallback(
     (player: Player) => {
@@ -145,6 +182,7 @@ export function useGameLogic({
   const newRound = useCallback(() => {
     setS(freshState(false, tcRef.current));
     setRunning(false);
+    setHistory([]);
   }, []);
 
   /** スコアも含めて完全初期化（モード選択に戻る時など） */
@@ -152,6 +190,7 @@ export function useGameLogic({
     setS(freshState(false, tcRef.current));
     setRunning(false);
     setScore({ o: 0, x: 0 });
+    setHistory([]);
   }, []);
 
   // AI の自動着手: AIの手番になったら 500〜900ms 後に最善手を置く。
@@ -180,8 +219,10 @@ export function useGameLogic({
     humanPlayer,
     aiPlayer,
     canHumanPlace,
+    canUndo,
     start,
     place,
+    undo,
     handleTimeout,
     newRound,
     reset,

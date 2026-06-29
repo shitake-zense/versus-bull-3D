@@ -1,7 +1,7 @@
 // 3Dキャンバスの上に React DOM で重ねる2D HUD。
 // タイマー・手番・残ピース・スコア・カメラ切替・結果/再戦を表示する。
 
-import { useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 import type { GameMode, Player, RoomStatus, Winner } from '../types';
 import { INITIAL_PIECES } from '../lib/gameLogic';
 import { TEAM } from '../lib/teams';
@@ -27,6 +27,25 @@ interface HUDProps {
   onRematch: () => void;
   onExit: () => void;
   rematchPending?: boolean;
+  /** 待った（手戻し）が可能か */
+  canTakeBack: boolean;
+  onTakeBack: () => void;
+  /** オンラインの待った申請（承認待ち）。なければ null */
+  undoRequest: { by: Player } | null;
+  onRespondUndo: (accept: boolean) => void;
+  /** リプレイ／盤面確認モードか */
+  reviewing: boolean;
+  /** 表示中の手数（0〜replayTotal） */
+  replayIndex: number;
+  /** 総手数 */
+  replayTotal: number;
+  /** 自動再生中か */
+  replayPlaying: boolean;
+  onReviewEnter: () => void;
+  onReviewExit: () => void;
+  onReplaySeek: (i: number) => void;
+  onReplayStep: (delta: number) => void;
+  onReplayPlayToggle: () => void;
 }
 
 function resultText(winner: Winner): { title: string; sub: string } {
@@ -66,15 +85,22 @@ export function HUD(props: HUDProps) {
     onRematch,
     onExit,
     rematchPending,
+    canTakeBack,
+    onTakeBack,
+    undoRequest,
+    onRespondUndo,
+    reviewing,
+    replayIndex,
+    replayTotal,
+    replayPlaying,
+    onReviewEnter,
+    onReviewExit,
+    onReplaySeek,
+    onReplayStep,
+    onReplayPlayToggle,
   } = props;
 
   const playing = status === 'playing' && !winner;
-
-  // 対局終了後に結果オーバーレイを一時的に隠して盤面を確認できる。
-  const [reviewing, setReviewing] = useState(false);
-  useEffect(() => {
-    if (!winner) setReviewing(false);
-  }, [winner]);
 
   return (
     <div className="pointer-events-none absolute inset-0 select-none">
@@ -112,8 +138,17 @@ export function HUD(props: HUDProps) {
         <PieceCount player="x" left={piecesLeft.x} />
       </div>
 
-      {/* リーチ表示トグル ＋ カメラビュー切替 */}
+      {/* 待った ＋ リーチ表示トグル ＋ カメラビュー切替 */}
       <div className="pointer-events-auto absolute bottom-3 right-3 flex flex-col items-end gap-2 sm:bottom-4 sm:right-4">
+        {canTakeBack && (
+          <button
+            onClick={onTakeBack}
+            className="rounded-md border border-col-gold/60 bg-bg-surface px-2.5 py-1.5 font-display text-xs text-white transition-colors hover:bg-col-gold/10"
+            title={mode === 'online' ? '直前の自分の手を取り消す（相手の承認が必要）' : '直前の手を取り消す'}
+          >
+            待った{mode === 'online' ? '（申請）' : ''}
+          </button>
+        )}
         <button
           onClick={onToggleThreats}
           className={[
@@ -165,6 +200,35 @@ export function HUD(props: HUDProps) {
         </div>
       )}
 
+      {/* 待った（手戻し）申請の通知 */}
+      {undoRequest && !winner && (
+        <div className="pointer-events-auto absolute left-1/2 top-1/3 w-[90%] max-w-sm -translate-x-1/2 rounded-lg border border-col-gold/50 bg-bg-surface px-5 py-4 text-center shadow-xl">
+          {undoRequest.by === myRole ? (
+            <div className="text-sm text-col-ui">待ったを申請中… 相手の承認を待っています</div>
+          ) : (
+            <>
+              <div className="text-sm text-white">
+                <span className="font-display">{names[undoRequest.by]}</span> が待ったを申請しています
+              </div>
+              <div className="mt-3 flex justify-center gap-3">
+                <button
+                  onClick={() => onRespondUndo(true)}
+                  className="rounded-md border border-col-gold/60 bg-bg-surface px-5 py-2 font-display text-sm text-white transition-colors hover:bg-col-gold/10"
+                >
+                  承認
+                </button>
+                <button
+                  onClick={() => onRespondUndo(false)}
+                  className="rounded-md border border-col-border bg-bg-surface px-5 py-2 font-display text-sm text-col-ui transition-colors hover:text-white"
+                >
+                  却下
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       {/* 結果オーバーレイ */}
       {winner && !reviewing && (
         <div className="pointer-events-auto absolute inset-0 flex flex-col items-center justify-center bg-bg-void/70 px-5 backdrop-blur-sm">
@@ -172,7 +236,15 @@ export function HUD(props: HUDProps) {
             {resultText(winner).title}
           </div>
           <div className="mt-2 font-mono text-sm text-col-ui sm:text-base">{resultText(winner).sub}</div>
-          <div className="mt-8 flex w-full max-w-xs flex-col gap-3 sm:w-auto sm:max-w-none sm:flex-row">
+          {/* 累計スコア（再戦のたびに伸びていく） */}
+          <div className="mt-5 flex items-center gap-3 font-mono text-lg sm:text-2xl">
+            <span style={{ color: '#F2F2F2' }}>{names.o}</span>
+            <span className="text-col-o">{score.o}</span>
+            <span className="opacity-40">-</span>
+            <span className="text-col-x">{score.x}</span>
+            <span style={{ color: '#AEB6C6' }}>{names.x}</span>
+          </div>
+          <div className="mt-7 flex w-full max-w-xs flex-col gap-3 sm:w-auto sm:max-w-none sm:flex-row">
             <button
               onClick={onRematch}
               disabled={rematchPending}
@@ -188,19 +260,53 @@ export function HUD(props: HUDProps) {
             </button>
           </div>
           <button
-            onClick={() => setReviewing(true)}
+            onClick={onReviewEnter}
             className="mt-5 text-sm text-col-ui underline underline-offset-4 transition-colors hover:text-white"
           >
-            盤面を確認する
+            リプレイ・盤面を確認する
           </button>
         </div>
       )}
 
-      {/* 盤面確認モード: 結果を隠して盤面だけ表示（カメラ切替で観察可能） */}
+      {/* リプレイ／盤面確認モード: 結果を隠し、棋譜を1手ずつ振り返る */}
       {winner && reviewing && (
-        <div className="pointer-events-auto absolute bottom-16 left-1/2 -translate-x-1/2 sm:bottom-20">
+        <div className="pointer-events-auto absolute bottom-16 left-1/2 flex -translate-x-1/2 flex-col items-center gap-3 sm:bottom-20">
+          {replayTotal > 0 && (
+            <div className="flex items-center gap-1.5 rounded-full border border-col-border bg-bg-surface/90 px-3 py-2 shadow-lg backdrop-blur">
+              <ReplayBtn title="最初へ" disabled={replayIndex <= 0} onClick={() => onReplaySeek(0)}>
+                «
+              </ReplayBtn>
+              <ReplayBtn title="1手戻る" disabled={replayIndex <= 0} onClick={() => onReplayStep(-1)}>
+                ‹
+              </ReplayBtn>
+              <ReplayBtn
+                title={replayPlaying ? '一時停止' : '自動再生'}
+                onClick={onReplayPlayToggle}
+                accent
+              >
+                {replayPlaying ? '⏸' : '▶'}
+              </ReplayBtn>
+              <ReplayBtn
+                title="1手進む"
+                disabled={replayIndex >= replayTotal}
+                onClick={() => onReplayStep(1)}
+              >
+                ›
+              </ReplayBtn>
+              <ReplayBtn
+                title="最後へ"
+                disabled={replayIndex >= replayTotal}
+                onClick={() => onReplaySeek(replayTotal)}
+              >
+                »
+              </ReplayBtn>
+              <span className="ml-1.5 min-w-[3.75rem] text-center font-mono text-xs text-col-ui">
+                {replayIndex} / {replayTotal} 手
+              </span>
+            </div>
+          )}
           <button
-            onClick={() => setReviewing(false)}
+            onClick={onReviewExit}
             className="rounded-full border border-col-gold/60 bg-bg-surface/90 px-5 py-2 font-display text-sm text-white shadow-lg backdrop-blur transition-colors hover:bg-col-gold/10"
           >
             結果へ戻る
@@ -208,6 +314,36 @@ export function HUD(props: HUDProps) {
         </div>
       )}
     </div>
+  );
+}
+
+function ReplayBtn({
+  children,
+  title,
+  disabled,
+  accent,
+  onClick,
+}: {
+  children: ReactNode;
+  title: string;
+  disabled?: boolean;
+  accent?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={[
+        'flex h-9 w-9 items-center justify-center rounded-md border font-mono text-base transition-colors disabled:opacity-30',
+        accent
+          ? 'border-col-gold/60 bg-col-gold/10 text-white hover:bg-col-gold/20'
+          : 'border-col-border bg-bg-surface text-col-ui hover:border-col-gold/60 hover:text-white',
+      ].join(' ')}
+    >
+      {children}
+    </button>
   );
 }
 

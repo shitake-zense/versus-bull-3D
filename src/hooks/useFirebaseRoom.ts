@@ -72,6 +72,10 @@ export interface UseFirebaseRoomResult {
   place: (cell: number) => void;
   reportTimeout: (player: Player) => void;
   requestRematch: () => void;
+  /** 待った（手戻し）を相手に申請する */
+  requestUndo: () => void;
+  /** 待った申請に応答する（true=承認で盤面を戻す / false=却下） */
+  respondUndo: (accept: boolean) => void;
 }
 
 export function useFirebaseRoom(
@@ -306,8 +310,53 @@ export function useFirebaseRoom(
         turnStartedAt: serverTimestamp(),
         winner: winner ?? null,
         status: winner ? 'finished' : 'playing',
+        lastMove: { cell, player: role }, // 待った用の巻き戻し情報
+        undo: null, // 着手したら保留中の待った申請は無効化（暗黙の却下）
       };
       void update(dbRoom(), updates);
+    },
+    [roomId, dbRoom],
+  );
+
+  // 待った（手戻し）を申請する。自分の直前手がある＝今は相手番のときのみ可。
+  const requestUndo = useCallback(() => {
+    const cur = roomRef.current;
+    const role = myRoleRef.current;
+    if (!roomId || !cur || !role) return;
+    if (cur.status !== 'playing' || cur.winner) return;
+    if (cur.currentTurn === role) return; // 自分の手番＝直前手はまだ無い
+    if (!cur.lastMove || cur.lastMove.player !== role) return;
+    if (cur.undo?.by) return; // 既に申請中
+    void update(dbRoom(), { undo: { by: role } });
+  }, [roomId, dbRoom]);
+
+  // 待った申請への応答。承認なら直前手を盤面から取り除き、手番を申請者へ戻す。
+  const respondUndo = useCallback(
+    (accept: boolean) => {
+      if (!roomId) return;
+      const offset = offsetRef.current;
+      void runTransaction(dbRoom(), (data: RoomData | null) => {
+        if (!data || !data.undo) return data;
+        const lm = data.lastMove;
+        if (accept && lm && data.status === 'playing') {
+          const board = { ...(data.board || {}) };
+          const stack = (board[String(lm.cell)] || []).slice();
+          if (stack.length > 0 && stack[stack.length - 1] === lm.player) {
+            stack.pop();
+            if (stack.length > 0) board[String(lm.cell)] = stack;
+            else delete board[String(lm.cell)];
+            data.board = Object.keys(board).length > 0 ? board : null;
+            data.piecesLeft[lm.player] = (data.piecesLeft[lm.player] ?? 0) + 1;
+            data.currentTurn = lm.player; // 手番を申請者へ戻す
+            data.turnStartedAt = Date.now() + offset; // 申請者の手番として時計を再始動
+            data.winner = null;
+            data.status = 'playing';
+            data.lastMove = null; // 一手前は不明なのでマーカーは消す
+          }
+        }
+        data.undo = null;
+        return data;
+      });
     },
     [roomId, dbRoom],
   );
@@ -362,6 +411,8 @@ export function useFirebaseRoom(
     place,
     reportTimeout,
     requestRematch,
+    requestUndo,
+    respondUndo,
   };
 }
 

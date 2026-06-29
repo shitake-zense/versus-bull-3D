@@ -9,6 +9,12 @@ export type Cell = Player[];
 /** 盤面。length 16（4×4）。index = row * 4 + col。 */
 export type Board = Cell[];
 
+/** 1手の記録（リプレイ・棋譜用）。どのマスへどちらが置いたか。 */
+export interface Move {
+  cell: number;
+  player: Player;
+}
+
 export type GameMode = 'online' | 'local' | 'ai';
 
 /** AI の強さ。easy=接待〜max=全力。useGameLogic / ai.ts で参照。 */
@@ -80,6 +86,10 @@ export interface RoomData {
   timeControl?: TimeControl;
   /** 先手の希望（ホスト視点。o=ホスト先攻 / x=ホスト後攻 / random）。開始時に解決 */
   turnPref?: TurnPref;
+  /** 直前の着手（待った＝undo の巻き戻しに使用） */
+  lastMove?: Move | null;
+  /** 待った（手戻し）申請。承認制：by=申請者、相手の承認で成立する */
+  undo?: { by: Player } | null;
 }
 
 export interface PlayerSlot {

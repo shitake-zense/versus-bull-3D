@@ -1,7 +1,7 @@
 // vsb3 純粋ゲームロジック
 // 盤面は副作用なしのイミュータブル操作で扱う。UI / AI / Firebase 同期の全てがこれを基準にする。
 
-import type { Board, Cell, Player, WinLine } from '../types';
+import type { Board, Cell, Move, Player, WinLine } from '../types';
 
 export const BOARD_DIM = 4; // 4×4
 export const CELL_COUNT = BOARD_DIM * BOARD_DIM; // 16
@@ -172,5 +172,13 @@ export function recordToBoard(rec: Record<string, Player[]> | null | undefined):
     const idx = Number(k);
     if (idx >= 0 && idx < CELL_COUNT && Array.isArray(v)) board[idx] = v.slice();
   }
+  return board;
+}
+
+/** 着手列を先頭から count 手だけ適用した盤面を返す（リプレイ用）。 */
+export function boardFromMoves(moves: Move[], count: number): Board {
+  let board = createEmptyBoard();
+  const n = Math.max(0, Math.min(count, moves.length));
+  for (let i = 0; i < n; i++) board = applyMove(board, moves[i].cell, moves[i].player);
   return board;
 }
