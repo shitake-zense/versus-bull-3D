@@ -18,6 +18,7 @@ import { useGameLogic } from './hooks/useGameLogic';
 import { useFirebaseRoom } from './hooks/useFirebaseRoom';
 import { useFisherClock } from './hooks/useFisherClock';
 import { useSound } from './hooks/useSound';
+import { useBgm } from './hooks/useBgm';
 import { Scene3D } from './components/Scene3D';
 import { HUD } from './components/HUD';
 import { RoomLobby, type WaitingState } from './components/RoomLobby';
@@ -43,6 +44,26 @@ export default function App() {
 
   const [pendingView, setPendingView] = useState<CameraView | null>(null);
   const [showThreats, setShowThreats] = useState(false);
+  // BGM（ループ音源）。デフォルトOFF。設定は localStorage に保存。
+  const [bgmOn, setBgmOn] = useState(() => {
+    try {
+      return localStorage.getItem('vsb3.bgm') === 'on';
+    } catch {
+      return false;
+    }
+  });
+  useBgm(bgmOn, 'bgm/ambient.wav');
+  const toggleBgm = useCallback(() => {
+    setBgmOn((v) => {
+      const next = !v;
+      try {
+        localStorage.setItem('vsb3.bgm', next ? 'on' : 'off');
+      } catch {
+        /* localStorage 不可環境は保存しないだけ */
+      }
+      return next;
+    });
+  }, []);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [offlineCountingDown, setOfflineCountingDown] = useState(false);
 
@@ -545,6 +566,8 @@ export default function App() {
           disconnected={disconnected}
           showThreats={showThreats}
           onToggleThreats={() => setShowThreats((v) => !v)}
+          bgmOn={bgmOn}
+          onToggleBgm={toggleBgm}
           onSelectView={setPendingView}
           onRematch={handleRematch}
           onExit={exitToMenu}
@@ -579,6 +602,8 @@ export default function App() {
           waiting={waiting}
           onStartGame={fb.startGame}
           onLeave={exitToMenu}
+          bgmOn={bgmOn}
+          onToggleBgm={toggleBgm}
         />
       )}
     </div>

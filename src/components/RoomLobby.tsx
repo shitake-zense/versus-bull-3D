@@ -43,6 +43,9 @@ interface RoomLobbyProps {
   waiting: WaitingState | null;
   onStartGame: () => void;
   onLeave: () => void;
+  /** BGM再生中か */
+  bgmOn: boolean;
+  onToggleBgm: () => void;
 }
 
 export function RoomLobby({
@@ -58,6 +61,8 @@ export function RoomLobby({
   waiting,
   onStartGame,
   onLeave,
+  bgmOn,
+  onToggleBgm,
 }: RoomLobbyProps) {
   const [aiSide, setAiSide] = useState<TurnPref>('o');
   const [aiLevel, setAiLevel] = useState<AiLevel>('normal');
@@ -222,6 +227,8 @@ export function RoomLobby({
         )}
         {waiting.error && <p className="text-sm text-[#E84040]">{waiting.error}</p>}
 
+        <BgmToggle on={bgmOn} onToggle={onToggleBgm} />
+
         <button onClick={onLeave} className="text-xs text-col-ui underline hover:text-white">
           キャンセルしてメニューへ
         </button>
@@ -353,7 +360,27 @@ export function RoomLobby({
           </button>
         </div>
       </div>
+
+      <BgmToggle on={bgmOn} onToggle={onToggleBgm} />
     </Shell>
+  );
+}
+
+/** BGM再生トグル（メニュー／待機ロビー共通）。 */
+function BgmToggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
+  return (
+    <button
+      onClick={onToggle}
+      className={[
+        'rounded-full border px-4 py-1.5 font-display text-xs transition-colors',
+        on
+          ? 'border-col-gold/70 bg-col-gold/15 text-white'
+          : 'border-col-border bg-bg-void text-col-ui hover:text-white',
+      ].join(' ')}
+      title="BGM（落ち着いたアンビエント）の再生切替"
+    >
+      ♪ BGM {on ? 'ON' : 'OFF'}
+    </button>
   );
 }
 

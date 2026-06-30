@@ -6,6 +6,9 @@ dist-ssr
 .env.*
 !.env.example
 
+# build artifacts
+*.tsbuildinfo
+
 # editor / os
 .DS_Store
 .vscode/*

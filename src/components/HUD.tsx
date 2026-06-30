@@ -34,6 +34,9 @@ interface HUDProps {
   disconnected: boolean;
   showThreats: boolean;
   onToggleThreats: () => void;
+  /** BGM再生中か */
+  bgmOn: boolean;
+  onToggleBgm: () => void;
   onSelectView: (v: CameraView) => void;
   onRematch: () => void;
   onExit: () => void;
@@ -97,6 +100,8 @@ export function HUD(props: HUDProps) {
     disconnected,
     showThreats,
     onToggleThreats,
+    bgmOn,
+    onToggleBgm,
     onSelectView,
     onRematch,
     onExit,
@@ -186,6 +191,18 @@ export function HUD(props: HUDProps) {
           title="相手が次に4連を作れるマス（リーチ）を赤リングで警告"
         >
           リーチ警告 {showThreats ? 'ON' : 'OFF'}
+        </button>
+        <button
+          onClick={onToggleBgm}
+          className={[
+            'rounded-md border px-2.5 py-1.5 font-display text-xs transition-colors',
+            bgmOn
+              ? 'border-col-gold/70 bg-col-gold/15 text-white'
+              : 'border-col-border bg-bg-surface text-col-ui hover:text-white',
+          ].join(' ')}
+          title="BGM（落ち着いたアンビエント）の再生切替"
+        >
+          ♪ BGM {bgmOn ? 'ON' : 'OFF'}
         </button>
         <div className="flex gap-2">
           {([1, 2, 3] as CameraView[]).map((v) => (
