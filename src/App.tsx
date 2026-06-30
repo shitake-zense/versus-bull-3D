@@ -1,7 +1,7 @@
 // 画面遷移と各モードの統合。menu ↔ game を切り替え、ローカル/AI と オンライン の状態源を束ねる。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { AiLevel, GameMode, Move, Player, Seat, TimeControl } from './types';
+import type { AiLevel, GameMode, Move, Player, Seat, TimeControl, TurnPref } from './types';
 import {
   applyMove,
   boardFromMoves,
@@ -32,6 +32,8 @@ export default function App() {
   const [playerName, setPlayerName] = useState('');
   const [aiPlayer, setAiPlayer] = useState<Player>('x');
   const [aiLevel, setAiLevel] = useState<AiLevel>('normal');
+  // AI対戦の手番希望（'o'|'x'|'random'）。再戦時の random 再抽選に使う。
+  const [aiTurnPref, setAiTurnPref] = useState<TurnPref>('o');
   const [timeControl, setTimeControl] = useState<TimeControl>(DEFAULT_TIME_CONTROL);
 
   const [roomId, setRoomId] = useState<string | null>(null);
@@ -324,9 +326,15 @@ export default function App() {
     requestAnimationFrame(startOfflineRound);
   }, [startOfflineRound]);
 
+  // 手番希望を実プレイヤー（人間側）へ解決。random は毎回抽選。
+  const resolveHumanSide = (pref: TurnPref): Player =>
+    pref === 'random' ? (Math.random() < 0.5 ? 'o' : 'x') : pref;
+
   const beginAI = useCallback(
-    (humanSide: Player, level: AiLevel) => {
+    (pref: TurnPref, level: AiLevel) => {
+      const humanSide = resolveHumanSide(pref);
       setAiPlayer(humanSide === 'o' ? 'x' : 'o');
+      setAiTurnPref(pref);
       setAiLevel(level);
       setMode('ai');
       setRoomId(null);
@@ -366,9 +374,17 @@ export default function App() {
   }, [offline]);
 
   const handleRematch = useCallback(() => {
-    if (isOnline) fb.requestRematch();
-    else startOfflineRound();
-  }, [isOnline, fb, startOfflineRound]);
+    if (isOnline) {
+      fb.requestRematch();
+      return;
+    }
+    // AI対戦で手番ランダムなら、再戦のたびに先攻/後攻を抽選し直す。
+    if (mode === 'ai' && aiTurnPref === 'random') {
+      const humanSide = resolveHumanSide('random');
+      setAiPlayer(humanSide === 'o' ? 'x' : 'o');
+    }
+    startOfflineRound();
+  }, [isOnline, fb, startOfflineRound, mode, aiTurnPref]);
 
   const place = useCallback(
     (cell: number) => {

@@ -421,11 +421,13 @@ export function useFirebaseRoom(
       // 両者が再戦を希望したら盤面をリセットして countdown へ。
       if (rematch.o && rematch.x) {
         const tc = normalizeTimeControl(data.timeControl);
+        // 手番希望を解決し直す（turnPref='random' なら再戦のたびに先攻/後攻を再抽選）。
+        const startTeam = resolveStartingPlayer(data.turnPref);
         data.board = null;
         data.piecesLeft = { o: INITIAL_PIECES, x: INITIAL_PIECES };
         data.winner = null;
-        data.currentTurn = FIRST_PLAYER;
-        data.currentSeat = FIRST_PLAYER;
+        data.currentTurn = startTeam;
+        data.currentSeat = startingSeat(startTeam);
         data.turnStartedAt = 0;
         data.status = 'countdown';
         data.rematch = {};

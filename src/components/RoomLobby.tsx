@@ -37,7 +37,7 @@ interface RoomLobbyProps {
   /** オンラインのロビーでホストが設定を変更（持ち時間・先手） */
   onChangeSettings: (tc: TimeControl, pref: TurnPref) => void;
   onLocal: () => void;
-  onAI: (side: Player, level: AiLevel) => void;
+  onAI: (pref: TurnPref, level: AiLevel) => void;
   /** オンラインルーム作成。teamMode=true で 2vs2 チーム戦 */
   onCreateRoom: (teamMode: boolean) => void;
   waiting: WaitingState | null;
@@ -64,10 +64,9 @@ export function RoomLobby({
   const [copied, setCopied] = useState(false);
   const [createTeamMode, setCreateTeamMode] = useState(false); // 1vs1 / 2vs2 切替（作成時）
 
-  // AI参戦時に side(先攻/後攻/ランダム)を実プレイヤーへ解決。
+  // 手番希望(先攻/後攻/ランダム)はそのまま App へ渡す（randomの抽選・再戦時の再抽選は App 側）。
   const startAI = () => {
-    const side: Player = aiSide === 'random' ? (Math.random() < 0.5 ? 'o' : 'x') : aiSide;
-    onAI(side, aiLevel);
+    onAI(aiSide, aiLevel);
   };
 
   // 待機ロビーでの自分の表示名。Firebase 上のスロット名から一度だけ初期化する。
@@ -304,19 +303,22 @@ export function RoomLobby({
         </button>
 
         <div className="rounded-lg border border-col-border bg-bg-surface px-5 py-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="font-display text-lg text-white">AI対戦</div>
-              <div className="text-xs text-col-ui">Minimax + 反復深化（立体読み）</div>
-            </div>
-            <div className="flex overflow-hidden rounded-md border border-col-border text-xs">
+          <div>
+            <div className="font-display text-lg text-white">AI対戦</div>
+            <div className="text-xs text-col-ui">Minimax + 反復深化（立体読み）</div>
+          </div>
+
+          {/* 手番選択（先攻/後攻/ランダム）。狭い画面でも潰れないよう独立した全幅グリッド。 */}
+          <div className="mt-3">
+            <div className="mb-1 text-[10px] uppercase tracking-wider text-col-ui">手番</div>
+            <div className="grid grid-cols-3 overflow-hidden rounded-md border border-col-border text-xs">
               {(['o', 'x', 'random'] as TurnPref[]).map((p) => (
                 <button
                   key={p}
                   onClick={() => setAiSide(p)}
-                  className={`px-3 py-1.5 ${aiSide === p ? 'bg-col-gold/20 text-white' : 'text-col-ui'}`}
+                  className={`py-1.5 ${aiSide === p ? 'bg-col-gold/20 text-white' : 'text-col-ui'}`}
                 >
-                  {p === 'o' ? 'ORIGIN' : p === 'x' ? 'XENOGENESIS' : 'ランダム'}
+                  {p === 'o' ? '先攻（O）' : p === 'x' ? '後攻（X）' : 'ランダム'}
                 </button>
               ))}
             </div>
