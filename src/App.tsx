@@ -381,10 +381,16 @@ export default function App() {
     // AI対戦で手番ランダムなら、再戦のたびに先攻/後攻を抽選し直す。
     if (mode === 'ai' && aiTurnPref === 'random') {
       const humanSide = resolveHumanSide('random');
-      setAiPlayer(humanSide === 'o' ? 'x' : 'o');
+      const nextAi: Player = humanSide === 'o' ? 'x' : 'o';
+      // 手番が実際に入れ替わるときは勝数も入れ替えて、スコアを symbol ではなく
+      // ユーザー（人間/CPU）に追従させる。
+      if (nextAi !== aiPlayer) {
+        setAiPlayer(nextAi);
+        offline.swapScore();
+      }
     }
     startOfflineRound();
-  }, [isOnline, fb, startOfflineRound, mode, aiTurnPref]);
+  }, [isOnline, fb, startOfflineRound, mode, aiTurnPref, aiPlayer, offline]);
 
   const place = useCallback(
     (cell: number) => {

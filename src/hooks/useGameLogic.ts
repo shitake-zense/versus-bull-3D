@@ -185,6 +185,14 @@ export function useGameLogic({
     setHistory([]);
   }, []);
 
+  /**
+   * O/X の勝数を入れ替える。手番ランダムの再戦で人間とCPU（または席）が
+   * 入れ替わったとき、勝数を「symbol ではなくユーザー」に追従させるために使う。
+   */
+  const swapScore = useCallback(() => {
+    setScore((sc) => ({ o: sc.x, x: sc.o }));
+  }, []);
+
   /** スコアも含めて完全初期化（モード選択に戻る時など） */
   const reset = useCallback(() => {
     setS(freshState(false, tcRef.current));
@@ -225,6 +233,7 @@ export function useGameLogic({
     undo,
     handleTimeout,
     newRound,
+    swapScore,
     reset,
   };
 }
