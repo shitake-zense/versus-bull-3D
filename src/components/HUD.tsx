@@ -34,6 +34,9 @@ interface HUDProps {
   disconnected: boolean;
   showThreats: boolean;
   onToggleThreats: () => void;
+  /** 自動回転（オートオービット）ON/OFF */
+  autoRotate: boolean;
+  onToggleAutoRotate: () => void;
   /** BGM再生中か */
   bgmOn: boolean;
   onToggleBgm: () => void;
@@ -102,6 +105,8 @@ export function HUD(props: HUDProps) {
     disconnected,
     showThreats,
     onToggleThreats,
+    autoRotate,
+    onToggleAutoRotate,
     bgmOn,
     onToggleBgm,
     onSelectView,
@@ -194,6 +199,18 @@ export function HUD(props: HUDProps) {
           title="相手が次に4連を作れるマス（リーチ）を赤リングで警告"
         >
           リーチ警告 {showThreats ? 'ON' : 'OFF'}
+        </button>
+        <button
+          onClick={onToggleAutoRotate}
+          className={[
+            'rounded-md border px-2.5 py-1.5 font-display text-xs transition-colors',
+            autoRotate
+              ? 'border-col-gold/70 bg-col-gold/15 text-white'
+              : 'border-col-border bg-bg-surface text-col-ui hover:text-white',
+          ].join(' ')}
+          title="盤面をゆっくり自動回転（立体感を確認）。ドラッグ操作は引き続き可能"
+        >
+          ↻ 自動回転 {autoRotate ? 'ON' : 'OFF'}
         </button>
         <button
           onClick={onToggleBgm}

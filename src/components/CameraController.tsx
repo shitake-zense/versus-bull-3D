@@ -1,7 +1,8 @@
 // OrbitControls + ビュープリセット(1/2/3)切り替え。
 // 切り替え時は 600ms かけてカメラ位置とターゲットを lerp する。
+// autoRotate=true でゆっくり自動回転（プリセット移動中は自動停止）。
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import { Vector3 } from 'three';
@@ -24,11 +25,15 @@ interface CameraControllerProps {
   /** 値が変わるたびにそのビューへアニメーション */
   pendingView: CameraView | null;
   onConsumed: () => void;
+  /** 自動回転（オートオービット）ON/OFF */
+  autoRotate: boolean;
 }
 
-export function CameraController({ pendingView, onConsumed }: CameraControllerProps) {
+export function CameraController({ pendingView, onConsumed, autoRotate }: CameraControllerProps) {
   const controlsRef = useRef<OrbitControlsImpl>(null);
   const { camera } = useThree();
+  // プリセット移動中は自動回転を止める（lerp と回転が競合しないよう prop で無効化）。
+  const [animating, setAnimating] = useState(false);
   const anim = useRef<{
     fromPos: Vector3;
     toPos: Vector3;
@@ -46,6 +51,7 @@ export function CameraController({ pendingView, onConsumed }: CameraControllerPr
       toTarget: new Vector3(0, 0.4, 0),
       start: performance.now(),
     };
+    setAnimating(true);
     onConsumed();
   }, [pendingView, camera, onConsumed]);
 
@@ -58,7 +64,10 @@ export function CameraController({ pendingView, onConsumed }: CameraControllerPr
     camera.position.lerpVectors(a.fromPos, a.toPos, e);
     controls.target.lerpVectors(a.fromTarget, a.toTarget, e);
     controls.update();
-    if (t >= 1) anim.current = null;
+    if (t >= 1) {
+      anim.current = null;
+      setAnimating(false);
+    }
   });
 
   return (
@@ -70,6 +79,8 @@ export function CameraController({ pendingView, onConsumed }: CameraControllerPr
       minPolarAngle={0.05}
       maxPolarAngle={Math.PI * 0.49}
       target={[0, 0.4, 0]}
+      autoRotate={autoRotate && !animating}
+      autoRotateSpeed={0.55}
       makeDefault
     />
   );

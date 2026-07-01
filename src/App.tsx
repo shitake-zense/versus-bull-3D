@@ -48,6 +48,25 @@ export default function App() {
 
   const [pendingView, setPendingView] = useState<CameraView | null>(null);
   const [showThreats, setShowThreats] = useState(false);
+  // 自動回転（オートオービット）。デフォルトOFF。設定は localStorage に保存。
+  const [autoRotate, setAutoRotate] = useState(() => {
+    try {
+      return localStorage.getItem('vsb3.autoRotate') === 'on';
+    } catch {
+      return false;
+    }
+  });
+  const toggleAutoRotate = useCallback(() => {
+    setAutoRotate((v) => {
+      const next = !v;
+      try {
+        localStorage.setItem('vsb3.autoRotate', next ? 'on' : 'off');
+      } catch {
+        /* localStorage 不可環境は保存しないだけ */
+      }
+      return next;
+    });
+  }, []);
   // BGM（ループ音源）。デフォルトOFF。設定は localStorage に保存。
   const [bgmOn, setBgmOn] = useState(() => {
     try {
@@ -560,6 +579,7 @@ export default function App() {
         threats={viewThreats}
         pendingView={pendingView}
         onViewConsumed={() => setPendingView(null)}
+        autoRotate={autoRotate}
         onCellClick={place}
       />
 
@@ -584,6 +604,8 @@ export default function App() {
           disconnected={disconnected}
           showThreats={showThreats}
           onToggleThreats={() => setShowThreats((v) => !v)}
+          autoRotate={autoRotate}
+          onToggleAutoRotate={toggleAutoRotate}
           bgmOn={bgmOn}
           onToggleBgm={toggleBgm}
           onSelectView={setPendingView}

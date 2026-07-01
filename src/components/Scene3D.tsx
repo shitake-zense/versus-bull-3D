@@ -18,6 +18,8 @@ interface Scene3DProps {
   threats: { cell: number; layer: number }[];
   pendingView: CameraView | null;
   onViewConsumed: () => void;
+  /** 自動回転（オートオービット）ON/OFF */
+  autoRotate: boolean;
   onCellClick: (cell: number) => void;
 }
 
@@ -80,7 +82,11 @@ export function Scene3D(props: Scene3DProps) {
         onCellClick={props.onCellClick}
       />
 
-      <CameraController pendingView={props.pendingView} onConsumed={props.onViewConsumed} />
+      <CameraController
+        pendingView={props.pendingView}
+        onConsumed={props.onViewConsumed}
+        autoRotate={props.autoRotate}
+      />
     </Canvas>
   );
 }
