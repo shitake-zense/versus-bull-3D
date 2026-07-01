@@ -25,6 +25,21 @@ const ANIM_MS = 600;
 const FOLLOW_R = 7.4;
 const FOLLOW_H = 5.4;
 const easeInOut = (t: number) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+
+/** カメラをターゲット中心の円柱座標（水平半径 r・方位角 theta・高さ h）に分解する。 */
+function orbitOf(pos: Vector3, target: Vector3): { r: number; theta: number; h: number } {
+  const ox = pos.x - target.x;
+  const oz = pos.z - target.z;
+  return { r: Math.hypot(ox, oz), theta: Math.atan2(ox, oz), h: pos.y - target.y };
+}
+
+/** 角度差を (-π, π] に正規化（回り込みは常に短い方の弧＝盤中心を突っ切らない）。 */
+function wrapAngle(d: number): number {
+  while (d > Math.PI) d -= 2 * Math.PI;
+  while (d <= -Math.PI) d += 2 * Math.PI;
+  return d;
+}
 
 /**
  * 着手マスが「手前・非遮蔽」で見える視点を計算する。
@@ -60,22 +75,29 @@ export function CameraController({
 }: CameraControllerProps) {
   const controlsRef = useRef<OrbitControlsImpl>(null);
   const { camera } = useThree();
+  // 位置は円柱座標（r/theta/h）で補間する＝方位角を回すので、反対側へ行くときも
+  // 直線で盤中心を突っ切らず軌道に沿って回り込む。ターゲットは線形補間。
   const anim = useRef<{
-    fromPos: Vector3;
-    toPos: Vector3;
     fromTarget: Vector3;
     toTarget: Vector3;
+    from: { r: number; theta: number; h: number };
+    to: { r: number; theta: number; h: number };
+    dTheta: number;
     start: number;
   } | null>(null);
 
   const beginAnim = (toPos: Vector3, toTarget: Vector3) => {
     const controls = controlsRef.current;
     if (!controls) return;
+    const fromTarget = controls.target.clone();
+    const from = orbitOf(camera.position, fromTarget);
+    const to = orbitOf(toPos, toTarget);
     anim.current = {
-      fromPos: camera.position.clone(),
-      toPos,
-      fromTarget: controls.target.clone(),
-      toTarget,
+      fromTarget,
+      toTarget: toTarget.clone(),
+      from,
+      to,
+      dTheta: wrapAngle(to.theta - from.theta),
       start: performance.now(),
     };
   };
@@ -102,8 +124,15 @@ export function CameraController({
     const a = anim.current;
     const t = Math.min(1, (performance.now() - a.start) / ANIM_MS);
     const e = easeInOut(t);
-    camera.position.lerpVectors(a.fromPos, a.toPos, e);
-    controls.target.lerpVectors(a.fromTarget, a.toTarget, e);
+    // ターゲットは線形、カメラ位置は円柱座標で補間（方位角を回して軌道に沿わせる）。
+    const tx = lerp(a.fromTarget.x, a.toTarget.x, e);
+    const ty = lerp(a.fromTarget.y, a.toTarget.y, e);
+    const tz = lerp(a.fromTarget.z, a.toTarget.z, e);
+    const theta = a.from.theta + a.dTheta * e;
+    const r = lerp(a.from.r, a.to.r, e);
+    const h = lerp(a.from.h, a.to.h, e);
+    camera.position.set(tx + Math.sin(theta) * r, ty + h, tz + Math.cos(theta) * r);
+    controls.target.set(tx, ty, tz);
     controls.update();
     if (t >= 1) anim.current = null;
   });
