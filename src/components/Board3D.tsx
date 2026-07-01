@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import type { Group } from 'three';
-import type { Board, Player, WinLine } from '../types';
-import { BOARD_DIM, CELL_COUNT, MAX_STACK } from '../lib/gameLogic';
+import type { Board, Player, Trap, WinLine } from '../types';
+import { BOARD_DIM, CELL_COUNT, MAX_STACK, isBlock } from '../lib/gameLogic';
 import { Piece3D, layerY } from './Piece3D';
 
 const CELL = 1; // 1マスの一辺
@@ -19,8 +19,8 @@ export function cellToXZ(cellIndex: number): [number, number] {
 
 interface Board3DProps {
   board: Board;
-  /** 封鎖マス（ブロッカー）のセル番号。着手不可・専用マーカー表示。 */
-  blocked: number[];
+  /** 落下ブロックの予告位置。未発動のものを予告マーカーで表示する。 */
+  traps: Trap[];
   winLine: WinLine | null;
   canPlace: boolean;
   currentTurn: Player;
@@ -33,7 +33,7 @@ interface Board3DProps {
 
 export function Board3D({
   board,
-  blocked,
+  traps,
   winLine,
   canPlace,
   currentTurn,
@@ -44,7 +44,11 @@ export function Board3D({
   const [hovered, setHovered] = useState<number | null>(null);
   // 仮置きしているマス（1回目のクリックで設定、同じマスを再クリックで確定）。
   const [tentative, setTentative] = useState<number | null>(null);
-  const blockedSet = useMemo(() => new Set(blocked), [blocked]);
+  // まだ発動していない（＝その層がブロックで埋まっていない）予告のみ表示する。
+  const pendingTraps = useMemo(
+    () => traps.filter((t) => !isBlock(board[t.cell]?.[t.layer] ?? null)),
+    [traps, board],
+  );
 
   // 自分の手番でなくなったら、または盤面が変わったら仮置きを破棄する。
   useEffect(() => {
@@ -72,10 +76,11 @@ export function Board3D({
         <lineBasicMaterial attach="material" color="#2a2e38" transparent opacity={0.7} />
       </gridHelper>
 
-      {/* 封鎖マス（ブロッカー）マーカー。着手不可を示す暗いスラブ＋赤いバツ。 */}
-      {blocked.map((cell) => (
-        <BlockerMarker key={`blocker-${cell}`} cell={cell} />
-      ))}
+      {/* 落下ブロックの予告マーカー（未発動のみ・勝利演出中は出さない）。 */}
+      {!winLine &&
+        pendingTraps.map((t) => (
+          <TrapTelegraph key={`trap-${t.cell}`} cell={t.cell} layer={t.layer} />
+        ))}
 
       {/* ピース */}
       {board.map((stack, cell) => {
@@ -133,8 +138,7 @@ export function Board3D({
       {/* クリック判定用の透明プレーン（各マス） */}
       {Array.from({ length: CELL_COUNT }, (_, cell) => {
         const [x, z] = cellToXZ(cell);
-        // 満杯マス or 封鎖マスは着手不可。
-        const disabled = board[cell].length >= MAX_STACK || blockedSet.has(cell);
+        const disabled = board[cell].length >= MAX_STACK; // 満杯マスは着手不可
         return (
           <mesh
             key={`hit-${cell}`}
@@ -167,28 +171,62 @@ export function Board3D({
   );
 }
 
-/** 封鎖マス（ブロッカー）。着手不可のマスを暗いスラブ＋赤いバツで示す。 */
-function BlockerMarker({ cell }: { cell: number }) {
+/**
+ * 落下ブロックの予告。降ってくる (cell, layer) にゴースト球体＋明滅する琥珀リングと
+ * 上向きの落下チェブロンを表示。1個下が埋まると中立ブロックが降る、と予告する。
+ */
+function TrapTelegraph({ cell, layer }: { cell: number; layer: number }) {
+  const ref = useRef<Group>(null);
+  const ghostRef = useRef<Group>(null);
   const [x, z] = cellToXZ(cell);
-  const barMat = { color: '#FF3B30', emissive: '#FF3B30', emissiveIntensity: 0.7 } as const;
+  const y = layerY(layer);
+
+  useFrame(() => {
+    const t = performance.now() / 1000;
+    const pulse = 0.5 + 0.5 * Math.sin(t * 3);
+    if (ref.current) {
+      const s = 1 + 0.1 * pulse;
+      ref.current.scale.set(s, 1, s);
+    }
+    // ゴースト球体はゆっくり上下に漂う＝「降ってくる」予感。
+    if (ghostRef.current) ghostRef.current.position.y = 0.12 * Math.sin(t * 2);
+  });
+
   return (
-    <group position={[x, 0, z]}>
-      {/* 台座スラブ（暗いハザード面） */}
-      <mesh position={[0, 0.03, 0]} castShadow receiveShadow>
-        <boxGeometry args={[0.86, 0.06, 0.86]} />
-        <meshStandardMaterial color="#15181f" roughness={0.7} metalness={0.2} />
-      </mesh>
-      {/* 赤いバツ（2本のバーを45°で交差） */}
-      <group position={[0, 0.075, 0]} rotation={[0, Math.PI / 4, 0]}>
-        <mesh>
-          <boxGeometry args={[0.62, 0.05, 0.11]} />
-          <meshStandardMaterial {...barMat} />
-        </mesh>
-        <mesh>
-          <boxGeometry args={[0.11, 0.05, 0.62]} />
-          <meshStandardMaterial {...barMat} />
+    <group position={[x, y, z]}>
+      {/* 着地位置を示す琥珀リング（水平） */}
+      <group ref={ref}>
+        <mesh rotation={[-Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.44, 0.045, 12, 40]} />
+          <meshStandardMaterial
+            color="#FFB020"
+            emissive="#FFB020"
+            emissiveIntensity={1.2}
+            transparent
+            opacity={0.85}
+          />
         </mesh>
       </group>
+      {/* 降ってくる中立ブロックのゴースト（半透明の岩） */}
+      <group ref={ghostRef}>
+        <mesh>
+          <icosahedronGeometry args={[0.26, 0]} />
+          <meshStandardMaterial
+            color="#B9C0CC"
+            emissive="#FFB020"
+            emissiveIntensity={0.25}
+            roughness={0.9}
+            metalness={0.1}
+            transparent
+            opacity={0.4}
+          />
+        </mesh>
+      </group>
+      {/* 落下方向を示す下向きチェブロン（上方に配置） */}
+      <mesh position={[0, 0.5, 0]} rotation={[Math.PI, 0, 0]}>
+        <coneGeometry args={[0.14, 0.24, 4]} />
+        <meshStandardMaterial color="#FFB020" emissive="#FFB020" emissiveIntensity={1} />
+      </mesh>
     </group>
   );
 }

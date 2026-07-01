@@ -3,14 +3,29 @@
 
 export type Player = 'o' | 'x';
 
+/** 中立の落下ブロック（隕石）。どちらのプレイヤーの4連にも使えない障害物。 */
+export const BLOCK = 'b';
+/** スタックに積まれる1要素。プレイヤー駒か、中立の落下ブロック。 */
+export type StackPiece = Player | typeof BLOCK;
+
+/**
+ * 落下ブロックの予告（トラップ）。対局開始時に予告位置を提示し、
+ * その1個下 (cell, layer-1) にピースが置かれた瞬間に (cell, layer) へ中立ブロックが降る。
+ */
+export interface Trap {
+  cell: number;
+  /** 降ってくる層（>=1）。1個下(layer-1)が埋まると発動。 */
+  layer: number;
+}
+
 /**
  * 着席位置。1vs1 は o/x の2席。2vs2 チーム戦は o/o2（ORIGIN陣営）と x/x2（XENO陣営）の4席。
  * 盤の記号・勝敗はチーム（= Player）単位なので seatTeam() で o/x へ畳む。
  */
 export type Seat = 'o' | 'x' | 'o2' | 'x2';
 
-/** 1マスのスタック。配列の先頭が最下層、末尾が最上層。 */
-export type Cell = Player[];
+/** 1マスのスタック。配列の先頭が最下層、末尾が最上層。プレイヤー駒＋中立ブロックを含む。 */
+export type Cell = StackPiece[];
 
 /** 盤面。length 16（4×4）。index = row * 4 + col。 */
 export type Board = Cell[];
@@ -86,8 +101,8 @@ export interface RoomData {
   };
   /** 2vs2 チーム戦か（未設定/false は 1vs1） */
   teamMode?: boolean;
-  /** { [cellIndex]: Player[] }。空マスはキー自体が無い場合がある。 */
-  board: Record<string, Player[]> | null;
+  /** { [cellIndex]: StackPiece[] }。空マスはキー自体が無い場合がある。中立ブロック 'b' を含みうる。 */
+  board: Record<string, StackPiece[]> | null;
   /** 盤に置くチーム（記号）。毎手 o↔x で交互。 */
   currentTurn: Player;
   /** 今この手を指す席。チーム戦で「同チームのどちらが指すか」を表す（未設定は currentTurn と同じ） */
@@ -101,10 +116,10 @@ export interface RoomData {
   rematch?: { o?: boolean; x?: boolean };
   /** 持ち時間設定（ホストが設定。未設定の旧ルームはデフォルト 5分+15秒） */
   timeControl?: TimeControl;
-  /** 封鎖マス（ブロッカー）の個数（ホストが設定。未設定は 0＝なし） */
-  blockerCount?: number;
-  /** 封鎖マスのセル番号。対局開始・再戦のたびにホストがランダム抽選して書く。 */
-  blockedCells?: number[] | null;
+  /** 落下ブロック（トラップ）の個数（ホストが設定。未設定は 0＝なし） */
+  trapCount?: number;
+  /** 落下ブロックの予告位置。対局開始・再戦のたびにホストがランダム抽選して書く。 */
+  traps?: Trap[] | null;
   /** 先手の希望（ホスト視点。o=ホスト先攻 / x=ホスト後攻 / random）。開始時に解決 */
   turnPref?: TurnPref;
   /** セッション通算スコア（room で一元管理。再戦で伸び、両クライアントで一致する） */

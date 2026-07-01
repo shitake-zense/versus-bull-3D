@@ -3,13 +3,15 @@
 // これにより「相手のオープン3を防ぐ」「自分のフォークを作る」といった立体的な手筋を理解する。
 // 時間予算内で到達できる最大深さまで反復深化し、1手の思考時間が暴れないようにする。
 
-import type { AiLevel, Board, Player } from '../types';
+import type { AiLevel, Board, Player, Trap } from '../types';
 import {
   BOARD_DIM,
   DIRECTIONS,
   WIN_LEN,
   applyMove,
+  applyMoveWithTrap,
   checkWinAt,
+  isBlock,
   legalMoves,
   oppositeOf,
 } from './gameLogic';
@@ -42,8 +44,8 @@ const IMMEDIATE_MULT = 6;
 
 interface SearchCtx {
   ai: Player;
-  /** 封鎖マス（ブロッカー）のセル番号。合法手から除外する。 */
-  blocked?: readonly number[];
+  /** 落下ブロックの予告。着手時に発動する中立ブロックを探索でも再現する。 */
+  traps: readonly Trap[];
 }
 
 const ABORT = Symbol('abort');
@@ -64,10 +66,10 @@ export function getBestMove(
   piecesLeft: Record<Player, number>,
   aiPlayer: Player,
   level: AiLevel = 'hard',
-  blocked: readonly number[] = [],
+  traps: readonly Trap[] = [],
 ): number | null {
   const cfg = LEVELS[level];
-  const rootMoves = orderedMoves(board, legalMoves(board, piecesLeft[aiPlayer], blocked));
+  const rootMoves = orderedMoves(board, legalMoves(board, piecesLeft[aiPlayer]));
   if (rootMoves.length === 0) return null;
 
   // ミス率: 一定確率でランダムな合法手を選ぶ（即勝ち判定より前なので必勝も見逃しうる）。
@@ -80,7 +82,7 @@ export function getBestMove(
     if (checkWinAt(applyMove(board, m, aiPlayer), m, aiPlayer)) return m;
   }
 
-  const ctx: SearchCtx = { ai: aiPlayer, blocked };
+  const ctx: SearchCtx = { ai: aiPlayer, traps };
   deadline = performance.now() + cfg.timeBudgetMs;
   nodeCounter = 0;
   let bestMove = rootMoves[0];
@@ -107,7 +109,7 @@ function rootSearch(
   prevBest: number,
   ctx: SearchCtx,
 ): { move: number; score: number } {
-  const moves = orderedMoves(board, legalMoves(board, piecesLeft[aiPlayer], ctx.blocked));
+  const moves = orderedMoves(board, legalMoves(board, piecesLeft[aiPlayer]));
   const ordered = [prevBest, ...moves.filter((m) => m !== prevBest)];
 
   let bestMove = ordered[0];
@@ -115,7 +117,7 @@ function rootSearch(
   let alpha = -Infinity;
 
   for (const move of ordered) {
-    const next = applyMove(board, move, aiPlayer);
+    const next = applyMoveWithTrap(board, move, aiPlayer, ctx.traps);
     const win = checkWinAt(next, move, aiPlayer);
     const score = win
       ? WIN_SCORE + depth
@@ -139,7 +141,7 @@ function minimax(
   ctx: SearchCtx,
 ): number {
   checkTime();
-  const moves = orderedMoves(board, legalMoves(board, piecesLeft[turn], ctx.blocked));
+  const moves = orderedMoves(board, legalMoves(board, piecesLeft[turn]));
   if (depth === 0 || moves.length === 0) {
     return evaluate(board, ctx.ai);
   }
@@ -148,7 +150,7 @@ function minimax(
   let best = maximizing ? -Infinity : Infinity;
 
   for (const move of moves) {
-    const next = applyMove(board, move, turn);
+    const next = applyMoveWithTrap(board, move, turn, ctx.traps);
     const win = checkWinAt(next, move, turn);
     let score: number;
     if (win) {
@@ -190,6 +192,7 @@ function evaluate(board: Board, ai: Player): number {
           let oppCount = 0;
           let immediate = true;
           let inBounds = true;
+          let dead = false; // 中立ブロックを含むラインは双方にとって死にライン
 
           for (let i = 0; i < WIN_LEN; i++) {
             const cc = c + i * dc;
@@ -202,6 +205,10 @@ function evaluate(board: Board, ai: Player): number {
             const h = heights[rr * BOARD_DIM + cc];
             if (ll < h) {
               const p = board[rr * BOARD_DIM + cc][ll];
+              if (isBlock(p)) {
+                dead = true;
+                break;
+              }
               if (p === ai) myCount++;
               else oppCount++;
             } else if (h !== ll) {
@@ -210,7 +217,7 @@ function evaluate(board: Board, ai: Player): number {
             }
           }
 
-          if (!inBounds) continue;
+          if (!inBounds || dead) continue;
           if (myCount > 0 && oppCount > 0) continue; // 両者混在は死にライン
           if (myCount === 0 && oppCount === 0) continue; // 空ラインは無価値
 

@@ -21,10 +21,13 @@ import {
   INITIAL_PIECES,
   MAX_STACK,
   FIRST_PLAYER,
+  applyBlock,
   applyMove,
   checkWinAt,
-  pickBlockedCells,
+  isBlock,
+  pickTraps,
   recordToBoard,
+  triggeredTrap,
 } from '../lib/gameLogic';
 import {
   DEFAULT_TIME_CONTROL,
@@ -59,7 +62,7 @@ function initialRoom(): RoomData {
     createdAt: Date.now(),
     timeControl: DEFAULT_TIME_CONTROL,
     turnPref: 'o',
-    blockerCount: 0,
+    trapCount: 0,
     score: { o: 0, x: 0 },
     teamMode: false,
     currentSeat: FIRST_PLAYER,
@@ -79,14 +82,14 @@ export interface UseFirebaseRoomResult {
     timeControl?: TimeControl,
     turnPref?: TurnPref,
     teamMode?: boolean,
-    blockerCount?: number,
+    trapCount?: number,
   ) => Promise<void>;
   /** 既存ルームに参加（空きスロットを取得） */
   joinRoom: () => Promise<void>;
   /** ロビーから対戦開始（ホストのみ） */
   startGame: () => void;
-  /** ルーム設定（持ち時間・先手・封鎖マス数）を更新（ホストのみ・待機中） */
-  updateSettings: (timeControl: TimeControl, turnPref: TurnPref, blockerCount: number) => void;
+  /** ルーム設定（持ち時間・先手・落下ブロック数）を更新（ホストのみ・待機中） */
+  updateSettings: (timeControl: TimeControl, turnPref: TurnPref, trapCount: number) => void;
   /** 自分のスロットの表示名を更新（ロビーで参加側も変更可能） */
   updateName: (name: string) => void;
   place: (cell: number) => void;
@@ -184,7 +187,7 @@ export function useFirebaseRoom(
       timeControl: TimeControl = DEFAULT_TIME_CONTROL,
       turnPref: TurnPref = 'o',
       teamMode = false,
-      blockerCount = 0,
+      trapCount = 0,
     ) => {
       if (!roomId) return;
       setError(null);
@@ -193,7 +196,7 @@ export function useFirebaseRoom(
       base.timeControl = tc;
       base.turnPref = turnPref;
       base.teamMode = teamMode;
-      base.blockerCount = blockerCount;
+      base.trapCount = trapCount;
       base.players.o = {
         name: playerName || 'O',
         connected: true,
@@ -259,8 +262,8 @@ export function useFirebaseRoom(
         turnStartedAt: serverTimestamp(),
         currentTurn: startTeam,
         currentSeat: startingSeat(startTeam),
-        // 開始時に封鎖マスをランダム抽選（両クライアントで同一になるようホストが確定）。
-        blockedCells: pickBlockedCells(cur.blockerCount ?? 0),
+        // 開始時に落下ブロックの予告をランダム抽選（両クライアントで同一になるようホストが確定）。
+        traps: pickTraps(cur.trapCount ?? 0),
         // 開始時に両チームの持ち時間を確定（ロビーで設定変更されていても整合させる）。
         'players/o/timeRemaining': tc.baseMs,
         'players/x/timeRemaining': tc.baseMs,
@@ -281,7 +284,7 @@ export function useFirebaseRoom(
 
   // ルーム設定（持ち時間・先手）を更新。ホストのみ・待機中だけ許可。
   const updateSettings = useCallback(
-    (timeControl: TimeControl, turnPref: TurnPref, blockerCount: number) => {
+    (timeControl: TimeControl, turnPref: TurnPref, trapCount: number) => {
       const cur = roomRef.current;
       if (!roomId || !cur) return;
       if (myRoleRef.current !== 'o' || cur.status !== 'waiting') return;
@@ -289,7 +292,7 @@ export function useFirebaseRoom(
       const updates: Record<string, unknown> = {
         timeControl: tc,
         turnPref,
-        blockerCount,
+        trapCount,
       };
       // 待機中の両者の表示用持ち時間も即時反映。
       if (cur.players.o) updates['players/o/timeRemaining'] = tc.baseMs;
@@ -322,7 +325,6 @@ export function useFirebaseRoom(
       if (cur.status !== 'playing' || cur.winner || activeSeat !== seat) return;
       if (cur.piecesLeft[team] <= 0) return;
       if ((cur.board?.[cell]?.length ?? 0) >= MAX_STACK) return; // 満杯マスには置けない
-      if (cur.blockedCells?.includes(cell)) return; // 封鎖マスには置けない
 
       const now = Date.now() + offsetRef.current;
       const elapsed = Math.max(0, now - cur.turnStartedAt);
@@ -334,8 +336,10 @@ export function useFirebaseRoom(
         ? teamSlot.timeRemaining
         : teamSlot.timeRemaining - elapsed + tc.incrementMs;
 
-      const board = applyMove(recordToBoard(cur.board), cell, team);
+      let board = applyMove(recordToBoard(cur.board), cell, team);
       const win = checkWinAt(board, cell, team);
+      // 勝利手でなければ、この着手で発動するトラップの中立ブロックを落とす。
+      if (!win && triggeredTrap(board, cell, cur.traps ?? [])) board = applyBlock(board, cell);
       const piecesLeft = { ...cur.piecesLeft, [team]: cur.piecesLeft[team] - 1 };
 
       // RTDB は null を書かないため、読み戻すと winner が undefined になる。
@@ -389,6 +393,8 @@ export function useFirebaseRoom(
         if (accept && lm && data.status === 'playing') {
           const board = { ...(data.board || {}) };
           const stack = (board[String(lm.cell)] || []).slice();
+          // 直前手で落下ブロックが乗っていれば、それも一緒に取り除く。
+          while (stack.length > 0 && isBlock(stack[stack.length - 1])) stack.pop();
           if (stack.length > 0 && stack[stack.length - 1] === lm.player) {
             stack.pop();
             if (stack.length > 0) board[String(lm.cell)] = stack;
@@ -449,8 +455,8 @@ export function useFirebaseRoom(
         data.status = 'countdown';
         data.rematch = {};
         data.lastMove = null;
-        // 封鎖マスは countdown→playing の host effect で再抽選する。ここでは前局の封鎖を消す。
-        data.blockedCells = null;
+        // 落下ブロックの予告は countdown→playing の host effect で再抽選する。ここでは前局分を消す。
+        data.traps = null;
         if (data.players.o) data.players.o.timeRemaining = tc.baseMs;
         if (data.players.x) data.players.x.timeRemaining = tc.baseMs;
       }

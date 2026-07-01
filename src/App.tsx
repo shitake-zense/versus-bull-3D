@@ -7,6 +7,7 @@ import {
   applyMove,
   boardFromMoves,
   checkWinAt,
+  isBlock,
   oppositeOf,
   recordToBoard,
   scanWin,
@@ -37,8 +38,8 @@ export default function App() {
   // AI対戦の手番希望（'o'|'x'|'random'）。再戦時の random 再抽選に使う。
   const [aiTurnPref, setAiTurnPref] = useState<TurnPref>('o');
   const [timeControl, setTimeControl] = useState<TimeControl>(DEFAULT_TIME_CONTROL);
-  // 封鎖マス（ブロッカー）の個数。ローカル/AI/オンライン作成時の共通設定。
-  const [blockerCount, setBlockerCount] = useState(0);
+  // 落下ブロック（トラップ）の個数。ローカル/AI/オンライン作成時の共通設定。
+  const [trapCount, setTrapCount] = useState(0);
 
   const [roomId, setRoomId] = useState<string | null>(null);
   const [intent, setIntent] = useState<Intent>(null);
@@ -74,7 +75,7 @@ export default function App() {
   const [replayIndex, setReplayIndex] = useState<number | null>(null);
   const [replayPlaying, setReplayPlaying] = useState(false);
 
-  const offline = useGameLogic({ mode: mode ?? 'local', aiPlayer, aiLevel, timeControl, blockerCount });
+  const offline = useGameLogic({ mode: mode ?? 'local', aiPlayer, aiLevel, timeControl, trapCount });
   const fb = useFirebaseRoom(mode === 'online' ? roomId : null, playerName);
 
   const isOnline = mode === 'online';
@@ -95,10 +96,10 @@ export default function App() {
   // ---- create / join の実行 ----
   useEffect(() => {
     if (!isOnline || !roomId || !intent) return;
-    if (intent === 'create') void fb.createRoom(timeControl, 'o', pendingTeamMode, blockerCount);
+    if (intent === 'create') void fb.createRoom(timeControl, 'o', pendingTeamMode, trapCount);
     else void fb.joinRoom();
     setIntent(null);
-  }, [isOnline, roomId, intent, fb, timeControl, pendingTeamMode, blockerCount]);
+  }, [isOnline, roomId, intent, fb, timeControl, pendingTeamMode, trapCount]);
 
   // ---- 派生状態（モード非依存ビュー） ----
   const status = isOnline
@@ -132,10 +133,10 @@ export default function App() {
     ? room?.piecesLeft ?? { o: 32, x: 32 }
     : offline.state.piecesLeft;
 
-  // 封鎖マス（ブロッカー）。オンラインはルーム値、ローカル/AI は offline 状態。
-  const blocked = useMemo<number[]>(
-    () => (isOnline ? room?.blockedCells ?? [] : offline.state.blocked),
-    [isOnline, room?.blockedCells, offline.state.blocked],
+  // 落下ブロックの予告（トラップ）。オンラインはルーム値、ローカル/AI は offline 状態。
+  const traps = useMemo(
+    () => (isOnline ? room?.traps ?? [] : offline.state.traps),
+    [isOnline, room?.traps, offline.state.traps],
   );
 
   // リーチ警告: 相手が「次に1手で4連を作れる」マス（＝今ブロックすべき脅威）。
@@ -146,12 +147,11 @@ export default function App() {
     const res: { cell: number; layer: number }[] = [];
     for (let c = 0; c < board.length; c++) {
       if (board[c].length >= MAX_STACK) continue; // 満杯マスは着地不可＝脅威にならない
-      if (blocked.includes(c)) continue; // 封鎖マスは着地不可＝脅威にならない
       const next = applyMove(board, c, opp);
       if (checkWinAt(next, c, opp)) res.push({ cell: c, layer: board[c].length });
     }
     return res;
-  }, [running, board, activePlayer, piecesLeft, blocked]);
+  }, [running, board, activePlayer, piecesLeft]);
 
   // 有効な持ち時間設定（オンラインはルーム値、ローカル/AI は App 状態）。
   const activeTimeControl = useMemo(
@@ -220,7 +220,9 @@ export default function App() {
   }, [isOnline, status, runCountdown]);
 
   // ---- 効果音＋直前着手の検知＋棋譜蓄積（盤面のピース増加で検知＝ローカル/リモート/AI 共通） ----
+  // 全ピース数（中立ブロック含む）＝増減の検知用。プレイヤー駒のみの数＝棋譜整合用。
   const totalPieces = board.reduce((a, c) => a + c.length, 0);
+  const playerPieces = board.reduce((a, c) => a + c.reduce((n, p) => n + (isBlock(p) ? 0 : 1), 0), 0);
   const prevTotal = useRef(0);
   const prevBoard = useRef<typeof board>(board);
   const [lastMove, setLastMove] = useState<{ cell: number; layer: number } | null>(null);
@@ -230,15 +232,19 @@ export default function App() {
     if (totalPieces > prevTotal.current) {
       playPlace();
       // 増えたピースを着手順（下→上）に拾い、直前手の強調と棋譜へ反映する。
-      const added: Move[] = [];
+      // 中立ブロック（落下ブロック）は着手ではないので棋譜には入れない。
+      const added: { cell: number; player: Player; layer: number }[] = [];
       for (let c = 0; c < board.length; c++) {
         const prevLen = prev[c]?.length ?? 0;
-        for (let l = prevLen; l < board[c].length; l++) added.push({ cell: c, player: board[c][l] });
+        for (let l = prevLen; l < board[c].length; l++) {
+          const p = board[c][l];
+          if (!isBlock(p)) added.push({ cell: c, player: p, layer: l });
+        }
       }
       if (added.length > 0) {
         const last = added[added.length - 1];
-        setLastMove({ cell: last.cell, layer: board[last.cell].length - 1 });
-        setMoveHistory((h) => [...h, ...added]);
+        setLastMove({ cell: last.cell, layer: last.layer });
+        setMoveHistory((h) => [...h, ...added.map((a) => ({ cell: a.cell, player: a.player }))]);
       }
     } else if (totalPieces < prevTotal.current) {
       setLastMove(null);
@@ -248,13 +254,13 @@ export default function App() {
         setReplayIndex(null);
         setReplayPlaying(false);
       } else {
-        // 待った（手戻し）: 棋譜は残った手数まで切り詰める（プレフィックスなので安全）。
-        setMoveHistory((h) => h.slice(0, totalPieces));
+        // 待った（手戻し）: 棋譜はプレイヤー駒の残り手数まで切り詰める（プレフィックスなので安全）。
+        setMoveHistory((h) => h.slice(0, playerPieces));
       }
     }
     prevTotal.current = totalPieces;
     prevBoard.current = board;
-  }, [totalPieces, board, playPlace]);
+  }, [totalPieces, playerPieces, board, playPlace]);
 
   useEffect(() => {
     if (winner === 'o' || winner === 'x') playWin();
@@ -263,8 +269,8 @@ export default function App() {
   // ---- リプレイの表示用ビュー（replayIndex が立っている間は棋譜から盤面を再現） ----
   const isReplaying = replayIndex !== null;
   const viewBoard = useMemo(
-    () => (replayIndex !== null ? boardFromMoves(moveHistory, replayIndex) : board),
-    [replayIndex, moveHistory, board],
+    () => (replayIndex !== null ? boardFromMoves(moveHistory, replayIndex, traps) : board),
+    [replayIndex, moveHistory, board, traps],
   );
   const viewLastMove = useMemo(() => {
     if (replayIndex === null) return lastMove;
@@ -546,7 +552,7 @@ export default function App() {
     <div className="relative h-full w-full overflow-hidden bg-bg-void">
       <Scene3D
         board={viewBoard}
-        blocked={blocked}
+        traps={traps}
         winLine={viewWinLine}
         canPlace={canPlace && !isReplaying}
         currentTurn={activePlayer}
@@ -607,8 +613,8 @@ export default function App() {
           onChangeName={handleChangeName}
           timeControl={timeControl}
           setTimeControl={setTimeControl}
-          blockerCount={blockerCount}
-          setBlockerCount={setBlockerCount}
+          trapCount={trapCount}
+          setTrapCount={setTrapCount}
           onChangeSettings={fb.updateSettings}
           onLocal={beginLocal}
           onAI={beginAI}

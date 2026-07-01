@@ -2,15 +2,15 @@
 
 import { Canvas } from '@react-three/fiber';
 import { Vector3 } from 'three';
-import type { Board, Player, WinLine } from '../types';
+import type { Board, Player, Trap, WinLine } from '../types';
 import { Board3D, cellToXZ } from './Board3D';
 import { CameraController, type CameraView } from './CameraController';
 import { layerY } from './Piece3D';
 
 interface Scene3DProps {
   board: Board;
-  /** 封鎖マス（ブロッカー）のセル番号。着手不可・専用マーカー表示。 */
-  blocked: number[];
+  /** 落下ブロックの予告位置。未発動のものを予告マーカーで表示する。 */
+  traps: Trap[];
   winLine: WinLine | null;
   canPlace: boolean;
   currentTurn: Player;
@@ -71,7 +71,7 @@ export function Scene3D(props: Scene3DProps) {
 
       <Board3D
         board={board}
-        blocked={props.blocked}
+        traps={props.traps}
         winLine={winLine}
         canPlace={props.canPlace}
         currentTurn={props.currentTurn}

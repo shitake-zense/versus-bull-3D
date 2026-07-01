@@ -2,16 +2,18 @@
 // （オンラインは useFirebaseRoom が状態源になるため、このフックは使わない。）
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { AiLevel, GameMode, Player, TimeControl, Winner, WinLine, Board } from '../types';
+import type { AiLevel, GameMode, Player, TimeControl, Trap, Winner, WinLine, Board } from '../types';
 import {
   INITIAL_PIECES,
   MAX_STACK,
   FIRST_PLAYER,
+  applyBlock,
   applyMove,
   checkWinAt,
   createEmptyBoard,
   oppositeOf,
-  pickBlockedCells,
+  pickTraps,
+  triggeredTrap,
 } from '../lib/gameLogic';
 import { DEFAULT_TIME_CONTROL, isUnlimited } from '../lib/timeControl';
 import { getBestMove } from '../lib/ai';
@@ -25,8 +27,8 @@ interface LocalState {
   /** 各プレイヤーの手番開始時点の残り時間(ms) */
   remaining: Record<Player, number>;
   turnStartedAt: number;
-  /** 封鎖マス（ブロッカー）のセル番号。対局中は不変。 */
-  blocked: number[];
+  /** 落下ブロックの予告位置。対局中は不変。 */
+  traps: Trap[];
 }
 
 export interface UseGameLogicOptions {
@@ -37,13 +39,13 @@ export interface UseGameLogicOptions {
   aiLevel?: AiLevel;
   /** 持ち時間設定 */
   timeControl?: TimeControl;
-  /** 封鎖マス（ブロッカー）の個数。対局開始時にランダム配置。 */
-  blockerCount?: number;
+  /** 落下ブロック（トラップ）の個数。対局開始時にランダム配置。 */
+  trapCount?: number;
   onPlace?: () => void;
   onWin?: (winner: Winner) => void;
 }
 
-function freshState(running: boolean, tc: TimeControl, blockerCount: number): LocalState {
+function freshState(running: boolean, tc: TimeControl, trapCount: number): LocalState {
   return {
     board: createEmptyBoard(),
     currentTurn: FIRST_PLAYER,
@@ -52,7 +54,7 @@ function freshState(running: boolean, tc: TimeControl, blockerCount: number): Lo
     winLine: null,
     remaining: { o: tc.baseMs, x: tc.baseMs },
     turnStartedAt: running ? Date.now() : 0,
-    blocked: pickBlockedCells(blockerCount),
+    traps: pickTraps(trapCount),
   };
 }
 
@@ -61,15 +63,15 @@ export function useGameLogic({
   aiPlayer = 'x',
   aiLevel = 'hard',
   timeControl = DEFAULT_TIME_CONTROL,
-  blockerCount = 0,
+  trapCount = 0,
   onPlace,
   onWin,
 }: UseGameLogicOptions) {
-  const [s, setS] = useState<LocalState>(() => freshState(false, timeControl, blockerCount));
+  const [s, setS] = useState<LocalState>(() => freshState(false, timeControl, trapCount));
   const tcRef = useRef(timeControl);
   tcRef.current = timeControl;
-  const bcRef = useRef(blockerCount);
-  bcRef.current = blockerCount;
+  const tcCountRef = useRef(trapCount);
+  tcCountRef.current = trapCount;
   const [running, setRunning] = useState(false);
   const [score, setScore] = useState<Record<Player, number>>({ o: 0, x: 0 });
   // 待った（手戻し）用: 各着手の「直前」の状態スナップショットを積む。
@@ -109,7 +111,6 @@ export function useGameLogic({
       const player = prev.currentTurn;
       if (prev.piecesLeft[player] <= 0) return;
       if (prev.board[cell].length >= MAX_STACK) return; // 満杯マスには置けない
-      if (prev.blocked.includes(cell)) return; // 封鎖マスには置けない
 
       const now = Date.now();
       const elapsed = now - prev.turnStartedAt;
@@ -118,8 +119,10 @@ export function useGameLogic({
         ? prev.remaining[player]
         : prev.remaining[player] - elapsed + tc.incrementMs;
 
-      const board = applyMove(prev.board, cell, player);
+      let board = applyMove(prev.board, cell, player);
       const win = checkWinAt(board, cell, player);
+      // 勝利手でなければ、この着手で発動するトラップの中立ブロックを落とす。
+      if (!win && triggeredTrap(board, cell, prev.traps)) board = applyBlock(board, cell);
       const piecesLeft = { ...prev.piecesLeft, [player]: prev.piecesLeft[player] - 1 };
 
       let winner: Winner = null;
@@ -140,7 +143,7 @@ export function useGameLogic({
         currentTurn: winner ? player : oppositeOf(player),
         remaining: { ...prev.remaining, [player]: moverRemaining },
         turnStartedAt: now,
-        blocked: prev.blocked,
+        traps: prev.traps,
       });
       cbRef.current.onPlace?.();
       if (winner) finish(winner);
@@ -193,7 +196,7 @@ export function useGameLogic({
 
   /** スコア維持で次の対局を準備（running=false のままカウントダウンを挟む） */
   const newRound = useCallback(() => {
-    setS(freshState(false, tcRef.current, bcRef.current));
+    setS(freshState(false, tcRef.current, tcCountRef.current));
     setRunning(false);
     setHistory([]);
   }, []);
@@ -208,7 +211,7 @@ export function useGameLogic({
 
   /** スコアも含めて完全初期化（モード選択に戻る時など） */
   const reset = useCallback(() => {
-    setS(freshState(false, tcRef.current, bcRef.current));
+    setS(freshState(false, tcRef.current, tcCountRef.current));
     setRunning(false);
     setScore({ o: 0, x: 0 });
     setHistory([]);
@@ -222,7 +225,7 @@ export function useGameLogic({
     const t = setTimeout(() => {
       const cur = sRef.current;
       if (cur.winner || cur.currentTurn !== aiPlayer) return;
-      const move = getBestMove(cur.board, cur.piecesLeft, aiPlayer, aiLevel, cur.blocked);
+      const move = getBestMove(cur.board, cur.piecesLeft, aiPlayer, aiLevel, cur.traps);
       if (move !== null) place(move);
     }, delay);
     return () => clearTimeout(t);

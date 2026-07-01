@@ -1,7 +1,8 @@
 // vsb3 純粋ゲームロジック
 // 盤面は副作用なしのイミュータブル操作で扱う。UI / AI / Firebase 同期の全てがこれを基準にする。
 
-import type { Board, Cell, Move, Player, WinLine } from '../types';
+import type { Board, Cell, Move, Player, StackPiece, Trap, WinLine } from '../types';
+import { BLOCK } from '../types';
 
 export const BOARD_DIM = 4; // 4×4
 export const CELL_COUNT = BOARD_DIM * BOARD_DIM; // 16
@@ -55,8 +56,8 @@ export const DIRECTIONS: Dir[] = (() => {
   return dirs; // 13 方向
 })();
 
-/** (col, row, layer) のピースを返す。範囲外・未配置なら null。 */
-export function pieceAt(board: Board, c: number, r: number, layer: number): Player | null {
+/** (col, row, layer) のピースを返す（中立ブロック 'b' を含みうる）。範囲外・未配置なら null。 */
+export function pieceAt(board: Board, c: number, r: number, layer: number): StackPiece | null {
   if (c < 0 || c >= BOARD_DIM || r < 0 || r >= BOARD_DIM || layer < 0) return null;
   const stack = board[r * BOARD_DIM + c];
   return layer < stack.length ? stack[layer] : null;
@@ -81,39 +82,78 @@ export function isCellFull(board: Board, cellIndex: number): boolean {
   return board[cellIndex].length >= MAX_STACK;
 }
 
-/** 封鎖マス（ブロッカー）の選択肢。対局開始時にこの個数をランダム封鎖する。 */
-export const BLOCKER_PRESETS = [0, 1, 2, 3] as const;
-
-/** ランダムに count 個の異なるセル(0..15)を封鎖マスとして選ぶ（昇順で返す）。 */
-export function pickBlockedCells(count: number): number[] {
-  const n = Math.max(0, Math.min(CELL_COUNT, Math.floor(count || 0)));
-  if (n === 0) return [];
-  const idx = Array.from({ length: CELL_COUNT }, (_, i) => i);
-  // Fisher-Yates で先頭 n 個をシャッフル抽出。
-  for (let i = 0; i < n; i++) {
-    const j = i + Math.floor(Math.random() * (CELL_COUNT - i));
-    [idx[i], idx[j]] = [idx[j], idx[i]];
-  }
-  return idx.slice(0, n).sort((a, b) => a - b);
+/** その要素が中立の落下ブロックか（型ガード）。 */
+export function isBlock(p: StackPiece | null): p is typeof BLOCK {
+  return p === BLOCK;
 }
 
 /**
- * 合法手の列挙。手持ちが残っていて、MAX_STACK 未満、かつ封鎖マスでないマスが合法。
- * blocked は封鎖マス（ブロッカー）のセル番号配列（省略時は封鎖なし）。
+ * 合法手の列挙。手持ちが残っていて MAX_STACK 未満のマスが合法。
+ * 落下ブロック（トラップ）は着手を禁止しない（その上に積めるので合法性には影響しない）。
  */
-export function legalMoves(
-  board: Board,
-  piecesLeftForPlayer: number,
-  blocked?: readonly number[],
-): number[] {
+export function legalMoves(board: Board, piecesLeftForPlayer: number): number[] {
   if (piecesLeftForPlayer <= 0) return [];
   const moves: number[] = [];
   for (let i = 0; i < CELL_COUNT; i++) {
     if (board[i].length >= MAX_STACK) continue;
-    if (blocked && blocked.includes(i)) continue;
     moves.push(i);
   }
   return moves;
+}
+
+// ---- 落下ブロック（トラップ）----
+
+/** 落下ブロックの個数プリセット。対局開始時にこの個数の予告を配置する。 */
+export const TRAP_PRESETS = [0, 1, 2, 3] as const;
+/** 降ってくる層の重み付き候補（低層寄り＝発動しやすさ重視）。 */
+const TRAP_LAYER_POOL = [1, 1, 2, 2, 2, 3];
+
+/**
+ * ランダムに count 個のトラップ（落下ブロックの予告）を作る。
+ * セルは重複しない（＝1列に予告は1つ）ので連鎖発動は起きない。
+ * 層は低め(1〜3)に寄せ、ゲーム中に発動しやすく・不意すぎないバランスにする。
+ */
+export function pickTraps(count: number): Trap[] {
+  const n = Math.max(0, Math.min(CELL_COUNT, Math.floor(count || 0)));
+  if (n === 0) return [];
+  const idx = Array.from({ length: CELL_COUNT }, (_, i) => i);
+  for (let i = 0; i < n; i++) {
+    const j = i + Math.floor(Math.random() * (CELL_COUNT - i));
+    [idx[i], idx[j]] = [idx[j], idx[i]];
+  }
+  return idx.slice(0, n).map((cell) => ({
+    cell,
+    layer: TRAP_LAYER_POOL[Math.floor(Math.random() * TRAP_LAYER_POOL.length)],
+  }));
+}
+
+/** 中立の落下ブロックを1個積んだ新しい盤面を返す。 */
+export function applyBlock(board: Board, cellIndex: number): Board {
+  const next = cloneBoard(board);
+  next[cellIndex] = [...next[cellIndex], BLOCK];
+  return next;
+}
+
+/**
+ * いま cell へ着手した直後、その列で発動するトラップを返す（無ければ undefined）。
+ * 「予告位置の1個下が埋まった＝スタック高さがちょうど trap.layer になった」瞬間に発動する。
+ * （かつ、まだそのマスがブロックで埋まっていない場合のみ。）
+ */
+export function triggeredTrap(board: Board, cellIndex: number, traps: readonly Trap[]): Trap | undefined {
+  const h = board[cellIndex].length;
+  return traps.find((t) => t.cell === cellIndex && t.layer === h);
+}
+
+/** 着手＋（発動すれば）落下ブロックまで適用した盤面を返す。AI 探索・リプレイ再現で使う。 */
+export function applyMoveWithTrap(
+  board: Board,
+  cellIndex: number,
+  player: Player,
+  traps: readonly Trap[],
+): Board {
+  let next = applyMove(board, cellIndex, player);
+  if (triggeredTrap(next, cellIndex, traps)) next = applyBlock(next, cellIndex);
+  return next;
 }
 
 /** 着手を適用した新しい盤面を返す（元の board は変更しない）。 */
@@ -150,7 +190,7 @@ export function scanWin(board: Board): WinLine | null {
     for (let c = 0; c < BOARD_DIM; c++) {
       for (let layer = 0; layer < maxLayer; layer++) {
         const p = pieceAt(board, c, r, layer);
-        if (!p) continue;
+        if (!p || isBlock(p)) continue; // 空 or 中立ブロックは起点にしない
         for (const [dc, dr, dl] of DIRECTIONS) {
           const line = lineFrom(board, c, r, layer, dc, dr, dl, p);
           if (line) return line;
@@ -189,15 +229,15 @@ export function isBoardFull(piecesLeft: Record<Player, number>): boolean {
 
 // ---- Firebase の board(Record<string,Player[]>) と Board(配列) の相互変換 ----
 
-export function boardToRecord(board: Board): Record<string, Player[]> {
-  const rec: Record<string, Player[]> = {};
+export function boardToRecord(board: Board): Record<string, StackPiece[]> {
+  const rec: Record<string, StackPiece[]> = {};
   board.forEach((cell, i) => {
     if (cell.length > 0) rec[String(i)] = cell;
   });
   return rec;
 }
 
-export function recordToBoard(rec: Record<string, Player[]> | null | undefined): Board {
+export function recordToBoard(rec: Record<string, StackPiece[]> | null | undefined): Board {
   const board = createEmptyBoard();
   if (!rec) return board;
   for (const [k, v] of Object.entries(rec)) {
@@ -207,10 +247,20 @@ export function recordToBoard(rec: Record<string, Player[]> | null | undefined):
   return board;
 }
 
-/** 着手列を先頭から count 手だけ適用した盤面を返す（リプレイ用）。 */
-export function boardFromMoves(moves: Move[], count: number): Board {
+/**
+ * 着手列を先頭から count 手だけ適用した盤面を返す（リプレイ用）。
+ * traps を渡すと、各手のあとに実戦と同じく落下ブロックを発動させて再現する
+ * （勝利手のあとは発動させない＝実戦の place と同じ挙動）。
+ */
+export function boardFromMoves(moves: Move[], count: number, traps: readonly Trap[] = []): Board {
   let board = createEmptyBoard();
   const n = Math.max(0, Math.min(count, moves.length));
-  for (let i = 0; i < n; i++) board = applyMove(board, moves[i].cell, moves[i].player);
+  for (let i = 0; i < n; i++) {
+    const { cell, player } = moves[i];
+    board = applyMove(board, cell, player);
+    if (!checkWinAt(board, cell, player) && triggeredTrap(board, cell, traps)) {
+      board = applyBlock(board, cell);
+    }
+  }
   return board;
 }

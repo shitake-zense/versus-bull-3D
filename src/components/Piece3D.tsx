@@ -4,7 +4,7 @@
 import { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Color, Group, MeshStandardMaterial } from 'three';
-import type { Player } from '../types';
+import type { StackPiece } from '../types';
 
 const PIECE_HALF_H = 0.16; // 着地時に底面が盤面(y=0)へ接するための半高さ
 const LAYER_GAP = 0.42; // 積み重ねの段差
@@ -13,10 +13,12 @@ const DROP_MS = 300;
 
 export const layerY = (layer: number) => PIECE_HALF_H + layer * LAYER_GAP;
 
-const PALETTE: Record<Player, { color: string; emissive: string; emissiveBase: number }> = {
+const PALETTE: Record<StackPiece, { color: string; emissive: string; emissiveBase: number }> = {
   // O=白 / X=黒（モノクロ。発光は無彩色の弱いものだけにして青みを排除）
   o: { color: '#F5F5F5', emissive: '#9aa0ae', emissiveBase: 0.04 },
   x: { color: '#121317', emissive: '#2b2f3a', emissiveBase: 0.05 },
+  // b=中立の落下ブロック（隕石）。灰色＋わずかな琥珀の発光。
+  b: { color: '#8A93A3', emissive: '#6b5330', emissiveBase: 0.12 },
 };
 
 const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
@@ -24,7 +26,7 @@ const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
 interface Piece3DProps {
   position: [number, number]; // [x, z]
   layer: number;
-  player: Player;
+  player: StackPiece;
   winning?: boolean;
   /** 仮置き（自分だけに見えるゴースト）。落下せず半透明で発光 パルスする。 */
   ghost?: boolean;
@@ -93,7 +95,7 @@ export function Piece3D({ position, layer, player, winning = false, ghost = fals
             <boxGeometry args={[0.12, 0.3, 0.42]} />
           </mesh>
         </group>
-      ) : (
+      ) : player === 'x' ? (
         // X = 太い十字を45°回してバツに（実物の赤バツに合わせた形）
         <group rotation={[0, Math.PI / 4, 0]}>
           <mesh material={material} castShadow receiveShadow>
@@ -103,6 +105,11 @@ export function Piece3D({ position, layer, player, winning = false, ghost = fals
             <boxGeometry args={[0.2, 0.3, 0.7]} />
           </mesh>
         </group>
+      ) : (
+        // b = 中立の落下ブロック（隕石）。ゴツゴツした灰色の多面体。
+        <mesh material={material} castShadow receiveShadow>
+          <icosahedronGeometry args={[0.36, 0]} />
+        </mesh>
       )}
     </group>
   );
