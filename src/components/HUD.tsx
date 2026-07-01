@@ -41,6 +41,8 @@ interface HUDProps {
   onRematch: () => void;
   onExit: () => void;
   rematchPending?: boolean;
+  /** 設定を変えて再戦（オンライン・ホストのみ、ロビーへ戻す）。null なら非表示 */
+  onReturnToLobby?: (() => void) | null;
   /** 待った（手戻し）が可能か */
   canTakeBack: boolean;
   onTakeBack: () => void;
@@ -106,6 +108,7 @@ export function HUD(props: HUDProps) {
     onRematch,
     onExit,
     rematchPending,
+    onReturnToLobby,
     canTakeBack,
     onTakeBack,
     undoRequest,
@@ -302,6 +305,14 @@ export function HUD(props: HUDProps) {
               メニューへ
             </button>
           </div>
+          {onReturnToLobby && !rematchPending && (
+            <button
+              onClick={onReturnToLobby}
+              className="mt-4 text-sm text-col-ui underline underline-offset-4 transition-colors hover:text-white"
+            >
+              設定を変えて再戦（ロビーへ）
+            </button>
+          )}
           <button
             onClick={onReviewEnter}
             className="mt-5 text-sm text-col-ui underline underline-offset-4 transition-colors hover:text-white"

@@ -590,6 +590,7 @@ export default function App() {
           onRematch={handleRematch}
           onExit={exitToMenu}
           rematchPending={rematchPending}
+          onReturnToLobby={isOnline && fb.myRole === 'o' ? fb.returnToLobby : null}
           canTakeBack={canTakeBack}
           onTakeBack={takeBack}
           undoRequest={undoRequest}

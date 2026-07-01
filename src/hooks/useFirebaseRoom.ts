@@ -95,6 +95,8 @@ export interface UseFirebaseRoomResult {
   place: (cell: number) => void;
   reportTimeout: (player: Player) => void;
   requestRematch: () => void;
+  /** 設定を変えて再戦: ホストが終局後にロビー（waiting）へ戻す（スコア・参加者は保持） */
+  returnToLobby: () => void;
   /** 待った（手戻し）を相手に申請する */
   requestUndo: () => void;
   /** 待った申請に応答する（true=承認で盤面を戻す / false=却下） */
@@ -464,6 +466,28 @@ export function useFirebaseRoom(
     });
   }, [roomId, dbRoom]);
 
+  // 設定を変えて再戦: ホストが終局後にロビー（waiting）へ戻す。盤面・勝敗・再戦希望・
+  // 予告を消し、スコアと参加者・設定は保持。ロビーでホストが持ち時間/先手/落下を変更→再開できる。
+  const returnToLobby = useCallback(() => {
+    if (myRoleRef.current !== 'o') return;
+    if (!roomId) return;
+    void runTransaction(dbRoom(), (data: RoomData | null) => {
+      if (!data || !data.winner) return data;
+      const tc = normalizeTimeControl(data.timeControl);
+      data.board = null;
+      data.piecesLeft = { o: INITIAL_PIECES, x: INITIAL_PIECES };
+      data.winner = null;
+      data.turnStartedAt = 0;
+      data.status = 'waiting';
+      data.rematch = {};
+      data.lastMove = null;
+      data.traps = null;
+      if (data.players.o) data.players.o.timeRemaining = tc.baseMs;
+      if (data.players.x) data.players.x.timeRemaining = tc.baseMs;
+      return data;
+    });
+  }, [roomId, dbRoom]);
+
   return {
     room,
     myRole,
@@ -478,6 +502,7 @@ export function useFirebaseRoom(
     place,
     reportTimeout,
     requestRematch,
+    returnToLobby,
     requestUndo,
     respondUndo,
   };
