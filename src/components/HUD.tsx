@@ -34,9 +34,9 @@ interface HUDProps {
   disconnected: boolean;
   showThreats: boolean;
   onToggleThreats: () => void;
-  /** 自動回転（オートオービット）ON/OFF */
-  autoRotate: boolean;
-  onToggleAutoRotate: () => void;
+  /** 直前着手のカメラ自動追従 ON/OFF */
+  followCam: boolean;
+  onToggleFollowCam: () => void;
   /** BGM再生中か */
   bgmOn: boolean;
   onToggleBgm: () => void;
@@ -105,8 +105,8 @@ export function HUD(props: HUDProps) {
     disconnected,
     showThreats,
     onToggleThreats,
-    autoRotate,
-    onToggleAutoRotate,
+    followCam,
+    onToggleFollowCam,
     bgmOn,
     onToggleBgm,
     onSelectView,
@@ -201,16 +201,16 @@ export function HUD(props: HUDProps) {
           リーチ警告 {showThreats ? 'ON' : 'OFF'}
         </button>
         <button
-          onClick={onToggleAutoRotate}
+          onClick={onToggleFollowCam}
           className={[
             'rounded-md border px-2.5 py-1.5 font-display text-xs transition-colors',
-            autoRotate
+            followCam
               ? 'border-col-gold/70 bg-col-gold/15 text-white'
               : 'border-col-border bg-bg-surface text-col-ui hover:text-white',
           ].join(' ')}
-          title="盤面をゆっくり自動回転（立体感を確認）。ドラッグ操作は引き続き可能"
+          title="直前の着手が見やすい角度へカメラを自動追従。ドラッグ操作は引き続き可能"
         >
-          ↻ 自動回転 {autoRotate ? 'ON' : 'OFF'}
+          🎥 追従 {followCam ? 'ON' : 'OFF'}
         </button>
         <button
           onClick={onToggleBgm}

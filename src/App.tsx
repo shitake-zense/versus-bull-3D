@@ -51,19 +51,19 @@ export default function App() {
 
   const [pendingView, setPendingView] = useState<CameraView | null>(null);
   const [showThreats, setShowThreats] = useState(false);
-  // 自動回転（オートオービット）。デフォルトOFF。設定は localStorage に保存。
-  const [autoRotate, setAutoRotate] = useState(() => {
+  // 直前着手のカメラ自動追従。デフォルトOFF。設定は localStorage に保存。
+  const [followCam, setFollowCam] = useState(() => {
     try {
-      return localStorage.getItem('vsb3.autoRotate') === 'on';
+      return localStorage.getItem('vsb3.followCam') === 'on';
     } catch {
       return false;
     }
   });
-  const toggleAutoRotate = useCallback(() => {
-    setAutoRotate((v) => {
+  const toggleFollowCam = useCallback(() => {
+    setFollowCam((v) => {
       const next = !v;
       try {
-        localStorage.setItem('vsb3.autoRotate', next ? 'on' : 'off');
+        localStorage.setItem('vsb3.followCam', next ? 'on' : 'off');
       } catch {
         /* localStorage 不可環境は保存しないだけ */
       }
@@ -608,7 +608,7 @@ export default function App() {
         threats={viewThreats}
         pendingView={pendingView}
         onViewConsumed={() => setPendingView(null)}
-        autoRotate={autoRotate}
+        followCam={followCam}
         onCellClick={place}
       />
 
@@ -633,8 +633,8 @@ export default function App() {
           disconnected={disconnected}
           showThreats={showThreats}
           onToggleThreats={() => setShowThreats((v) => !v)}
-          autoRotate={autoRotate}
-          onToggleAutoRotate={toggleAutoRotate}
+          followCam={followCam}
+          onToggleFollowCam={toggleFollowCam}
           bgmOn={bgmOn}
           onToggleBgm={toggleBgm}
           onSelectView={setPendingView}
