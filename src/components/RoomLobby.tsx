@@ -1,11 +1,11 @@
 // モード選択と、オンライン対戦の待機ロビー。
 
 import { useEffect, useRef, useState } from 'react';
-import type { AiLevel, Player, RoomData, Seat, TimeControl, TurnPref } from '../types';
+import type { AiLevel, BoardShapeId, Player, RoomData, Seat, TimeControl, TurnPref } from '../types';
 import { isFirebaseConfigured } from '../lib/firebase';
 import { AI_LEVEL_LABEL, TEAM } from '../lib/teams';
 import { requiredSeats, seatTeam, seatSuffix } from '../lib/seats';
-import { TRAP_PRESETS } from '../lib/gameLogic';
+import { BOARD_SHAPE_IDS, TRAP_PRESETS, initialPieces } from '../lib/gameLogic';
 import {
   BASE_PRESETS,
   INCREMENT_PRESETS,
@@ -38,8 +38,11 @@ interface RoomLobbyProps {
   /** 落下ブロック（トラップ）の個数。ローカル/AI/オンライン作成の共通設定 */
   trapCount: number;
   setTrapCount: (n: number) => void;
-  /** オンラインのロビーでホストが設定を変更（持ち時間・先手・落下ブロック数） */
-  onChangeSettings: (tc: TimeControl, pref: TurnPref, trapCount: number) => void;
+  /** 盤の形状。ローカル/AI/オンライン作成の共通設定 */
+  boardShape: BoardShapeId;
+  setBoardShape: (s: BoardShapeId) => void;
+  /** オンラインのロビーでホストが設定を変更（持ち時間・先手・落下ブロック数・盤形状） */
+  onChangeSettings: (tc: TimeControl, pref: TurnPref, trapCount: number, shape: BoardShapeId) => void;
   onLocal: () => void;
   onAI: (pref: TurnPref, level: AiLevel) => void;
   /** AI観戦（AI vs AI）を開始。O側・X側の強さを指定 */
@@ -62,6 +65,8 @@ export function RoomLobby({
   setTimeControl,
   trapCount,
   setTrapCount,
+  boardShape,
+  setBoardShape,
   onChangeSettings,
   onLocal,
   onAI,
@@ -117,6 +122,7 @@ export function RoomLobby({
     const roomTc = normalizeTimeControl(waiting.room?.timeControl);
     const roomPref: TurnPref = waiting.room?.turnPref ?? 'o';
     const roomTrap = waiting.room?.trapCount ?? 0;
+    const roomShape: BoardShapeId = waiting.room?.boardShape ?? 'square';
     const myTeam = mySeat ? seatTeam(mySeat) : null;
     const myLabel = mySeat
       ? teamMode
@@ -202,20 +208,24 @@ export function RoomLobby({
 
         {/* ルーム設定（ホストのみ編集可・待機中） */}
         <div className="w-full rounded-lg border border-col-border bg-bg-void/40 px-3 py-3 text-xs text-col-ui">
-          <div>ルール: 4×4 立体・タテヨコナナメ4連</div>
+          <div>ルール: 立体・タテヨコナナメ4連 ／ 盤: {shapeLabel(roomShape)}</div>
           {isHost ? (
             <div className="mt-2.5 flex flex-col gap-2">
               <TimeControlPicker
                 value={roomTc}
-                onChange={(tc) => onChangeSettings(tc, roomPref, roomTrap)}
+                onChange={(tc) => onChangeSettings(tc, roomPref, roomTrap, roomShape)}
               />
               <TurnOrderPicker
                 value={roomPref}
-                onChange={(p) => onChangeSettings(roomTc, p, roomTrap)}
+                onChange={(p) => onChangeSettings(roomTc, p, roomTrap, roomShape)}
               />
               <TrapPicker
                 value={roomTrap}
-                onChange={(n) => onChangeSettings(roomTc, roomPref, n)}
+                onChange={(n) => onChangeSettings(roomTc, roomPref, n, roomShape)}
+              />
+              <ShapePicker
+                value={roomShape}
+                onChange={(s) => onChangeSettings(roomTc, roomPref, roomTrap, s)}
               />
             </div>
           ) : (
@@ -289,8 +299,9 @@ export function RoomLobby({
         </label>
         <div className="rounded-lg border border-col-border bg-bg-surface px-3 py-2">
           <TimeControlPicker value={timeControl} onChange={setTimeControl} />
-          <div className="mt-2 border-t border-col-border/60 pt-2">
+          <div className="mt-2 flex flex-col gap-2 border-t border-col-border/60 pt-2">
             <TrapPicker value={trapCount} onChange={setTrapCount} />
+            <ShapePicker value={boardShape} onChange={setBoardShape} />
           </div>
         </div>
       </div>
@@ -578,6 +589,47 @@ function TrapPicker({
             className={`flex-1 py-1 text-xs ${value === n ? 'bg-col-gold/20 text-white' : 'text-col-ui'}`}
           >
             {n === 0 ? 'なし' : `${n}`}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** 盤形状の表示ラベル。 */
+const SHAPE_LABEL: Record<BoardShapeId, string> = {
+  square: 'スクエア',
+  octagon: 'オクタゴン',
+  diamond: 'ダイヤ',
+  plus: 'プラス',
+};
+function shapeLabel(s: BoardShapeId): string {
+  return `${SHAPE_LABEL[s]}（${initialPieces(s)}個）`;
+}
+
+/**
+ * 盤形状ピッカー。すべて点対称かつ線対称で公平。
+ * square=4×4 / octagon=角落とし / diamond=菱形 / plus=十字。総ピース数は形状で変わる。
+ */
+function ShapePicker({
+  value,
+  onChange,
+}: {
+  value: BoardShapeId;
+  onChange: (s: BoardShapeId) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-10 shrink-0 text-[10px] uppercase tracking-wider text-col-ui">盤形</span>
+      <div className="flex flex-1 overflow-hidden rounded-md border border-col-border">
+        {BOARD_SHAPE_IDS.map((s) => (
+          <button
+            key={s}
+            onClick={() => onChange(s)}
+            title={`${SHAPE_LABEL[s]}・総ピース ${initialPieces(s)}個`}
+            className={`flex-1 py-1 text-xs ${value === s ? 'bg-col-gold/20 text-white' : 'text-col-ui'}`}
+          >
+            {SHAPE_LABEL[s]}
           </button>
         ))}
       </div>

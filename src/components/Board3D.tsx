@@ -4,17 +4,18 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import type { Group } from 'three';
 import type { Board, Player, Trap, WinLine } from '../types';
-import { BOARD_DIM, CELL_COUNT, MAX_STACK, isBlock } from '../lib/gameLogic';
+import { boardDim, boardGeometry, MAX_STACK, isBlock } from '../lib/gameLogic';
 import { Piece3D, layerY } from './Piece3D';
 
 const CELL = 1; // 1マスの一辺
-const HALF = (BOARD_DIM - 1) / 2; // 中央寄せ用 (1.5)
 
-/** cellIndex → ワールド座標 [x, z] */
+/** cellIndex → ワールド座標 [x, z]。盤寸法は現在のジオメトリから動的に取る。 */
 export function cellToXZ(cellIndex: number): [number, number] {
-  const row = Math.floor(cellIndex / BOARD_DIM);
-  const col = cellIndex % BOARD_DIM;
-  return [(col - HALF) * CELL, (row - HALF) * CELL];
+  const dim = boardDim();
+  const half = (dim - 1) / 2;
+  const row = Math.floor(cellIndex / dim);
+  const col = cellIndex % dim;
+  return [(col - half) * CELL, (row - half) * CELL];
 }
 
 interface Board3DProps {
@@ -63,18 +64,26 @@ export function Board3D({
     return new Set(winLine.coords.map((co) => `${co.cell}-${co.layer}`));
   }, [winLine]);
 
+  // プレイ可能セル（穴を除く）。盤の輪郭＝形状はこのタイル群で表現する。
+  const activeCells = boardGeometry().active;
+
   return (
     <group>
-      {/* ボード台座（中間グレー: 白O・黒X 双方が映える） */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.02, 0]} receiveShadow>
-        <planeGeometry args={[BOARD_DIM + 0.4, BOARD_DIM + 0.4]} />
-        <meshStandardMaterial color="#878E9D" roughness={0.8} metalness={0.1} />
-      </mesh>
-
-      {/* グリッド線 */}
-      <gridHelper args={[BOARD_DIM, BOARD_DIM, '#2a2e38', '#2a2e38']} position={[0, 0.001, 0]}>
-        <lineBasicMaterial attach="material" color="#2a2e38" transparent opacity={0.7} />
-      </gridHelper>
+      {/* ボード台座タイル（プレイ可能マスごとに敷く＝特殊形状の輪郭がそのまま出る） */}
+      {activeCells.map((cell) => {
+        const [x, z] = cellToXZ(cell);
+        return (
+          <mesh
+            key={`tile-${cell}`}
+            rotation={[-Math.PI / 2, 0, 0]}
+            position={[x, -0.02, z]}
+            receiveShadow
+          >
+            <planeGeometry args={[CELL * 0.94, CELL * 0.94]} />
+            <meshStandardMaterial color="#878E9D" roughness={0.8} metalness={0.1} />
+          </mesh>
+        );
+      })}
 
       {/* 落下ブロックの予告マーカー（未発動のみ・勝利演出中は出さない）。 */}
       {!winLine &&
@@ -135,8 +144,8 @@ export function Board3D({
         </mesh>
       )}
 
-      {/* クリック判定用の透明プレーン（各マス） */}
-      {Array.from({ length: CELL_COUNT }, (_, cell) => {
+      {/* クリック判定用の透明プレーン（プレイ可能マスのみ） */}
+      {activeCells.map((cell) => {
         const [x, z] = cellToXZ(cell);
         const disabled = board[cell].length >= MAX_STACK; // 満杯マスは着手不可
         return (

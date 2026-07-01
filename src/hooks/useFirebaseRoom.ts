@@ -18,7 +18,7 @@ import {
 } from 'firebase/database';
 import { getDb } from '../lib/firebase';
 import {
-  INITIAL_PIECES,
+  initialPieces,
   MAX_STACK,
   FIRST_PLAYER,
   applyBlock,
@@ -27,6 +27,7 @@ import {
   isBlock,
   pickTraps,
   recordToBoard,
+  setBoardShape,
   triggeredTrap,
 } from '../lib/gameLogic';
 import {
@@ -42,7 +43,7 @@ import {
   seatTeam,
   startingSeat,
 } from '../lib/seats';
-import type { Player, RoomData, Seat, TimeControl, TurnPref, Winner } from '../types';
+import type { BoardShapeId, Player, RoomData, Seat, TimeControl, TurnPref, Winner } from '../types';
 
 const COUNTDOWN_MS = 3000;
 
@@ -57,12 +58,13 @@ function initialRoom(): RoomData {
     board: null,
     currentTurn: FIRST_PLAYER,
     turnStartedAt: 0,
-    piecesLeft: { o: INITIAL_PIECES, x: INITIAL_PIECES },
+    piecesLeft: { o: initialPieces('square'), x: initialPieces('square') },
     winner: null,
     createdAt: Date.now(),
     timeControl: DEFAULT_TIME_CONTROL,
     turnPref: 'o',
     trapCount: 0,
+    boardShape: 'square',
     score: { o: 0, x: 0 },
     teamMode: false,
     currentSeat: FIRST_PLAYER,
@@ -83,13 +85,19 @@ export interface UseFirebaseRoomResult {
     turnPref?: TurnPref,
     teamMode?: boolean,
     trapCount?: number,
+    boardShape?: BoardShapeId,
   ) => Promise<void>;
   /** 既存ルームに参加（空きスロットを取得） */
   joinRoom: () => Promise<void>;
   /** ロビーから対戦開始（ホストのみ） */
   startGame: () => void;
-  /** ルーム設定（持ち時間・先手・落下ブロック数）を更新（ホストのみ・待機中） */
-  updateSettings: (timeControl: TimeControl, turnPref: TurnPref, trapCount: number) => void;
+  /** ルーム設定（持ち時間・先手・落下ブロック数・盤形状）を更新（ホストのみ・待機中） */
+  updateSettings: (
+    timeControl: TimeControl,
+    turnPref: TurnPref,
+    trapCount: number,
+    boardShape: BoardShapeId,
+  ) => void;
   /** 自分のスロットの表示名を更新（ロビーで参加側も変更可能） */
   updateName: (name: string) => void;
   place: (cell: number) => void;
@@ -190,6 +198,7 @@ export function useFirebaseRoom(
       turnPref: TurnPref = 'o',
       teamMode = false,
       trapCount = 0,
+      boardShape: BoardShapeId = 'square',
     ) => {
       if (!roomId) return;
       setError(null);
@@ -199,6 +208,8 @@ export function useFirebaseRoom(
       base.turnPref = turnPref;
       base.teamMode = teamMode;
       base.trapCount = trapCount;
+      base.boardShape = boardShape;
+      base.piecesLeft = { o: initialPieces(boardShape), x: initialPieces(boardShape) };
       base.players.o = {
         name: playerName || 'O',
         connected: true,
@@ -259,6 +270,8 @@ export function useFirebaseRoom(
       if (!cur || cur.status !== 'countdown') return;
       const tc = normalizeTimeControl(cur.timeControl);
       const startTeam = resolveStartingPlayer(cur.turnPref);
+      // 予告抽選が正しい形状のセル上で行われるよう、ここでもジオメトリを確定。
+      setBoardShape(cur.boardShape ?? 'square');
       void update(dbRoom(), {
         status: 'playing',
         turnStartedAt: serverTimestamp(),
@@ -284,17 +297,21 @@ export function useFirebaseRoom(
     void update(dbRoom(), { status: 'countdown' });
   }, [roomId, dbRoom]);
 
-  // ルーム設定（持ち時間・先手）を更新。ホストのみ・待機中だけ許可。
+  // ルーム設定（持ち時間・先手・落下数・盤形状）を更新。ホストのみ・待機中だけ許可。
   const updateSettings = useCallback(
-    (timeControl: TimeControl, turnPref: TurnPref, trapCount: number) => {
+    (timeControl: TimeControl, turnPref: TurnPref, trapCount: number, boardShape: BoardShapeId) => {
       const cur = roomRef.current;
       if (!roomId || !cur) return;
       if (myRoleRef.current !== 'o' || cur.status !== 'waiting') return;
       const tc = normalizeTimeControl(timeControl);
+      const pieces = initialPieces(boardShape);
       const updates: Record<string, unknown> = {
         timeControl: tc,
         turnPref,
         trapCount,
+        boardShape,
+        // 形状で総ピース数が変わるので待機中に反映（表示・開始時の整合）。
+        piecesLeft: { o: pieces, x: pieces },
       };
       // 待機中の両者の表示用持ち時間も即時反映。
       if (cur.players.o) updates['players/o/timeRemaining'] = tc.baseMs;
@@ -448,8 +465,9 @@ export function useFirebaseRoom(
         const tc = normalizeTimeControl(data.timeControl);
         // 手番希望を解決し直す（turnPref='random' なら再戦のたびに先攻/後攻を再抽選）。
         const startTeam = resolveStartingPlayer(data.turnPref);
+        const pieces = initialPieces(data.boardShape ?? 'square');
         data.board = null;
-        data.piecesLeft = { o: INITIAL_PIECES, x: INITIAL_PIECES };
+        data.piecesLeft = { o: pieces, x: pieces };
         data.winner = null;
         data.currentTurn = startTeam;
         data.currentSeat = startingSeat(startTeam);
@@ -474,8 +492,9 @@ export function useFirebaseRoom(
     void runTransaction(dbRoom(), (data: RoomData | null) => {
       if (!data || !data.winner) return data;
       const tc = normalizeTimeControl(data.timeControl);
+      const pieces = initialPieces(data.boardShape ?? 'square');
       data.board = null;
-      data.piecesLeft = { o: INITIAL_PIECES, x: INITIAL_PIECES };
+      data.piecesLeft = { o: pieces, x: pieces };
       data.winner = null;
       data.turnStartedAt = 0;
       data.status = 'waiting';

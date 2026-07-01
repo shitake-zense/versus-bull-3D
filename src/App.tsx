@@ -1,16 +1,19 @@
 // 画面遷移と各モードの統合。menu ↔ game を切り替え、ローカル/AI と オンライン の状態源を束ねる。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { AiLevel, GameMode, Move, Player, Seat, TimeControl, TurnPref } from './types';
+import type { AiLevel, BoardShapeId, GameMode, Move, Player, Seat, TimeControl, TurnPref } from './types';
 import {
   MAX_STACK,
   applyMove,
   boardFromMoves,
   checkWinAt,
+  initialPieces,
+  isActiveCell,
   isBlock,
   oppositeOf,
   recordToBoard,
   scanWin,
+  setBoardShape,
 } from './lib/gameLogic';
 import { requiredSeats } from './lib/seats';
 import { DEFAULT_TIME_CONTROL, isUnlimited, normalizeTimeControl } from './lib/timeControl';
@@ -43,6 +46,8 @@ export default function App() {
   const [timeControl, setTimeControl] = useState<TimeControl>(DEFAULT_TIME_CONTROL);
   // 落下ブロック（トラップ）の個数。ローカル/AI/オンライン作成時の共通設定。
   const [trapCount, setTrapCount] = useState(0);
+  // 盤の形状（ローカル/AI/オンライン作成時の共通設定）。
+  const [boardShape, setBoardShapeState] = useState<BoardShapeId>('square');
 
   const [roomId, setRoomId] = useState<string | null>(null);
   const [intent, setIntent] = useState<Intent>(null);
@@ -111,6 +116,13 @@ export default function App() {
   const isOnline = mode === 'online';
   const room = fb.room;
 
+  // 有効な盤形状（オンラインはルーム値、ローカル/AI/観戦は App 状態）。
+  // pure ロジック（recordToBoard・scanWin・threat 走査・AI）はモジュール状態 GEO を参照するため、
+  // 盤面を導出する前にこのレンダーで確定させる。同一形状なら no-op。
+  const activeShape: BoardShapeId = isOnline ? room?.boardShape ?? 'square' : boardShape;
+  setBoardShape(activeShape);
+  const piecesPerPlayer = initialPieces(activeShape);
+
   // ---- URL から初期ルームを取得（招待リンク） ----
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -126,10 +138,10 @@ export default function App() {
   // ---- create / join の実行 ----
   useEffect(() => {
     if (!isOnline || !roomId || !intent) return;
-    if (intent === 'create') void fb.createRoom(timeControl, 'o', pendingTeamMode, trapCount);
+    if (intent === 'create') void fb.createRoom(timeControl, 'o', pendingTeamMode, trapCount, boardShape);
     else void fb.joinRoom();
     setIntent(null);
-  }, [isOnline, roomId, intent, fb, timeControl, pendingTeamMode, trapCount]);
+  }, [isOnline, roomId, intent, fb, timeControl, pendingTeamMode, trapCount, boardShape]);
 
   // ---- 派生状態（モード非依存ビュー） ----
   const status = isOnline
@@ -160,7 +172,7 @@ export default function App() {
   }, [isOnline, winner, board, offline.state.winLine]);
 
   const piecesLeft = isOnline
-    ? room?.piecesLeft ?? { o: 32, x: 32 }
+    ? room?.piecesLeft ?? { o: piecesPerPlayer, x: piecesPerPlayer }
     : offline.state.piecesLeft;
 
   // 落下ブロックの予告（トラップ）。オンラインはルーム値、ローカル/AI は offline 状態。
@@ -176,6 +188,7 @@ export default function App() {
     if (piecesLeft[opp] <= 0) return [];
     const res: { cell: number; layer: number }[] = [];
     for (let c = 0; c < board.length; c++) {
+      if (!isActiveCell(c)) continue; // 穴（プレイ不可）は脅威にならない
       if (board[c].length >= MAX_STACK) continue; // 満杯マスは着地不可＝脅威にならない
       const next = applyMove(board, c, opp);
       if (checkWinAt(next, c, opp)) res.push({ cell: c, layer: board[c].length });
@@ -621,6 +634,7 @@ export default function App() {
           timed={timed}
           currentTurn={activePlayer}
           piecesLeft={piecesLeft}
+          totalPieces={piecesPerPlayer}
           score={isOnline ? onlineScore : offline.score}
           winner={winner}
           myRole={myRole}
@@ -667,6 +681,8 @@ export default function App() {
           setTimeControl={setTimeControl}
           trapCount={trapCount}
           setTrapCount={setTrapCount}
+          boardShape={boardShape}
+          setBoardShape={setBoardShapeState}
           onChangeSettings={fb.updateSettings}
           onLocal={beginLocal}
           onAI={beginAI}

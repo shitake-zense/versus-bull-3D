@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AiLevel, GameMode, Player, TimeControl, Trap, Winner, WinLine, Board } from '../types';
 import {
-  INITIAL_PIECES,
+  initialPieces,
   MAX_STACK,
   FIRST_PLAYER,
   applyBlock,
@@ -50,10 +50,13 @@ export interface UseGameLogicOptions {
 }
 
 function freshState(running: boolean, tc: TimeControl, trapCount: number): LocalState {
+  // createEmptyBoard()/initialPieces() は現在の盤形状（GEO）に追従する。
+  // App が対局開始前に setBoardShape 済みなので、ここでは現在値を読むだけでよい。
+  const pieces = initialPieces();
   return {
     board: createEmptyBoard(),
     currentTurn: FIRST_PLAYER,
-    piecesLeft: { o: INITIAL_PIECES, x: INITIAL_PIECES },
+    piecesLeft: { o: pieces, x: pieces },
     winner: null,
     winLine: null,
     remaining: { o: tc.baseMs, x: tc.baseMs },

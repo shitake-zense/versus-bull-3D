@@ -5,12 +5,13 @@
 
 import type { AiLevel, Board, Player, Trap } from '../types';
 import {
-  BOARD_DIM,
   DIRECTIONS,
   WIN_LEN,
   applyMove,
   applyMoveWithTrap,
+  boardDim,
   checkWinAt,
+  isActiveCell,
   isBlock,
   legalMoves,
   oppositeOf,
@@ -183,28 +184,34 @@ function evaluate(board: Board, ai: Player): number {
   for (const h of heights) topLayer = Math.max(topLayer, h - 1);
   if (topLayer < 0) return 0;
 
+  const dim = boardDim();
   let score = 0;
-  for (let r = 0; r < BOARD_DIM; r++) {
-    for (let c = 0; c < BOARD_DIM; c++) {
+  for (let r = 0; r < dim; r++) {
+    for (let c = 0; c < dim; c++) {
       for (let L0 = 0; L0 <= topLayer; L0++) {
         for (const [dc, dr, dl] of DIRECTIONS) {
           let myCount = 0;
           let oppCount = 0;
           let immediate = true;
           let inBounds = true;
-          let dead = false; // 中立ブロックを含むラインは双方にとって死にライン
+          let dead = false; // 中立ブロック or 穴を含むラインは双方にとって死にライン
 
           for (let i = 0; i < WIN_LEN; i++) {
             const cc = c + i * dc;
             const rr = r + i * dr;
             const ll = L0 + i * dl;
-            if (cc < 0 || cc >= BOARD_DIM || rr < 0 || rr >= BOARD_DIM || ll < 0) {
+            if (cc < 0 || cc >= dim || rr < 0 || rr >= dim || ll < 0) {
               inBounds = false;
               break;
             }
-            const h = heights[rr * BOARD_DIM + cc];
+            const idx = rr * dim + cc;
+            if (!isActiveCell(idx)) {
+              dead = true; // 穴は永久に埋まらない＝このラインは完成不能
+              break;
+            }
+            const h = heights[idx];
             if (ll < h) {
-              const p = board[rr * BOARD_DIM + cc][ll];
+              const p = board[idx][ll];
               if (isBlock(p)) {
                 dead = true;
                 break;
@@ -236,19 +243,18 @@ function decrement(piecesLeft: Record<Player, number>, player: Player): Record<P
   return { ...piecesLeft, [player]: piecesLeft[player] - 1 };
 }
 
-// 中央(5,6,9,10)に近いマスを優先する基準順。
-const CENTER_ORDER = (() => {
-  const center = (BOARD_DIM - 1) / 2;
-  return Array.from({ length: BOARD_DIM * BOARD_DIM }, (_, i) => i).sort((a, b) => {
-    const da = Math.abs((a % BOARD_DIM) - center) + Math.abs(Math.floor(a / BOARD_DIM) - center);
-    const db = Math.abs((b % BOARD_DIM) - center) + Math.abs(Math.floor(b / BOARD_DIM) - center);
-    return da - db;
-  });
-})();
-
-/** 既にピースのあるマス（＝スタックが高い＝脅威が集まりやすい）を中央順より優先。 */
+/**
+ * 手の並べ替え（α-β の枝刈り効率↑）。高いスタック（脅威が集まる）を最優先、
+ * 同高なら盤中央寄りを優先。盤寸法は現在のジオメトリから動的に取る。
+ */
 function orderedMoves(board: Board, moves: number[]): number[] {
   if (moves.length <= 1) return moves;
-  const set = new Set(moves);
-  return CENTER_ORDER.filter((m) => set.has(m)).sort((a, b) => board[b].length - board[a].length);
+  const dim = boardDim();
+  const center = (dim - 1) / 2;
+  const dist = (m: number) =>
+    Math.abs((m % dim) - center) + Math.abs(Math.floor(m / dim) - center);
+  return moves.slice().sort((a, b) => {
+    const dh = board[b].length - board[a].length;
+    return dh !== 0 ? dh : dist(a) - dist(b);
+  });
 }

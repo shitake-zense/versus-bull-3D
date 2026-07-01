@@ -52,6 +52,13 @@ export interface TimeControl {
 /** 先手（最初に着手する側）の希望。'random' は対局開始時に o/x へ解決。 */
 export type TurnPref = Player | 'random';
 
+/**
+ * 盤の形状。すべて点対称かつ線対称（D4 対称）で公平。
+ * square=4×4（既定）/ octagon=5×5の四隅落とし / diamond=5×5の菱形 / plus=5×5の十字。
+ * 特殊形状は「境界グリッド＋穴（プレイ不可セル）」で表現し、穴を通る4連は成立しない。
+ */
+export type BoardShapeId = 'square' | 'octagon' | 'diamond' | 'plus';
+
 export type RoomStatus = 'waiting' | 'countdown' | 'playing' | 'finished';
 
 export type Winner =
@@ -118,6 +125,8 @@ export interface RoomData {
   timeControl?: TimeControl;
   /** 落下ブロック（トラップ）の個数（ホストが設定。未設定は 0＝なし） */
   trapCount?: number;
+  /** 盤の形状（ホストが設定。未設定の旧ルームは 'square'＝4×4） */
+  boardShape?: BoardShapeId;
   /** 落下ブロックの予告位置。対局開始・再戦のたびにホストがランダム抽選して書く。 */
   traps?: Trap[] | null;
   /** 先手の希望（ホスト視点。o=ホスト先攻 / x=ホスト後攻 / random）。開始時に解決 */

@@ -3,7 +3,6 @@
 
 import type { ReactNode } from 'react';
 import type { GameMode, Player, RoomStatus, Seat, Winner } from '../types';
-import { INITIAL_PIECES } from '../lib/gameLogic';
 import { TEAM } from '../lib/teams';
 import { seatSuffix } from '../lib/seats';
 import type { CameraView } from './CameraController';
@@ -17,6 +16,8 @@ interface HUDProps {
   timed: boolean;
   currentTurn: Player;
   piecesLeft: Record<Player, number>;
+  /** 各プレイヤーの総ピース数（盤形状で変わる）。「残り / 総数」表示に使う */
+  totalPieces: number;
   score: Record<Player, number>;
   winner: Winner;
   myRole: Player | null;
@@ -93,6 +94,7 @@ export function HUD(props: HUDProps) {
     timed,
     currentTurn,
     piecesLeft,
+    totalPieces,
     score,
     winner,
     myRole,
@@ -173,8 +175,8 @@ export function HUD(props: HUDProps) {
 
       {/* 残ピース表示 */}
       <div className="absolute bottom-3 left-3 flex flex-col gap-1 font-mono text-xs sm:bottom-4 sm:left-4">
-        <PieceCount player="o" left={piecesLeft.o} />
-        <PieceCount player="x" left={piecesLeft.x} />
+        <PieceCount player="o" left={piecesLeft.o} total={totalPieces} />
+        <PieceCount player="x" left={piecesLeft.x} total={totalPieces} />
       </div>
 
       {/* 待った ＋ リーチ表示トグル ＋ カメラビュー切替 */}
@@ -443,7 +445,7 @@ function TeamRoster({
   );
 }
 
-function PieceCount({ player, left }: { player: Player; left: number }) {
+function PieceCount({ player, left, total }: { player: Player; left: number; total: number }) {
   const color = player === 'o' ? '#F2F2F2' : '#AEB6C6';
   return (
     <div className="flex items-center gap-2 rounded-md border border-col-border bg-bg-surface/80 px-2 py-1">
@@ -453,7 +455,7 @@ function PieceCount({ player, left }: { player: Player; left: number }) {
         <span className="ml-1 opacity-70">{TEAM[player].name}</span>
       </span>
       <span style={{ color }}>{left}</span>
-      <span className="text-col-ui/50">/ {INITIAL_PIECES}</span>
+      <span className="text-col-ui/50">/ {total}</span>
     </div>
   );
 }

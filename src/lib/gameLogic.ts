@@ -1,40 +1,122 @@
 // vsb3 純粋ゲームロジック
 // 盤面は副作用なしのイミュータブル操作で扱う。UI / AI / Firebase 同期の全てがこれを基準にする。
 
-import type { Board, Cell, Move, Player, StackPiece, Trap, WinLine } from '../types';
+import type { Board, BoardShapeId, Cell, Move, Player, StackPiece, Trap, WinLine } from '../types';
 import { BLOCK } from '../types';
 
-export const BOARD_DIM = 4; // 4×4
-export const CELL_COUNT = BOARD_DIM * BOARD_DIM; // 16
-export const INITIAL_PIECES = 32; // 各プレイヤーの総ピース数
 export const MAX_STACK = 10; // 1マスに積める最大段数（これ以上は着手不可）
 export const START_TIME_MS = 300_000; // 初期持ち時間 5分
 export const INCREMENT_MS = 15_000; // フィッシャー加算 +15秒
 export const FIRST_PLAYER: Player = 'o';
+export const WIN_LEN = 4;
 
-/**
- * 同一層内の水平ライン（行4・列4・対角2 = 10本）。各要素は cellIndex の配列。
- * 正式な勝利判定は checkWinAt(3D) が行う。これは AI 評価関数のヒューリスティック用。
- */
-export const WIN_LINES: number[][] = buildWinLines();
+// ---- 盤形状（ジオメトリ）----
+// 盤は「境界グリッド dim×dim ＋ 穴（プレイ不可セル）」で表現する。cellIndex = row*dim + col。
+// 穴セルは常に空スタックのままなので、そこを通る4連は pieceAt=null で自然に断たれる
+// （＝勝利判定ロジックは形状非依存のまま流用できる）。全形状は D4 対称で公平。
 
-function buildWinLines(): number[][] {
+/** 形状の定義。dim=境界グリッド辺長、active(r,c)=そのマスがプレイ可能か。 */
+interface ShapeSpec {
+  dim: number;
+  active: (r: number, c: number) => boolean;
+}
+
+const SHAPE_SPECS: Record<BoardShapeId, ShapeSpec> = {
+  // 4×4 全面（既定・従来どおり）。
+  square: { dim: 4, active: () => true },
+  // 5×5 の四隅を落とした八角形。
+  octagon: {
+    dim: 5,
+    active: (r, c) => !((r === 0 || r === 4) && (c === 0 || c === 4)),
+  },
+  // 5×5 の菱形（中心からのマンハッタン距離 ≤ 2）。
+  diamond: { dim: 5, active: (r, c) => Math.abs(r - 2) + Math.abs(c - 2) <= 2 },
+  // 5×5 の十字（中央の行・列のみ）。
+  plus: { dim: 5, active: (r, c) => r === 2 || c === 2 },
+};
+
+export const BOARD_SHAPE_IDS: BoardShapeId[] = ['square', 'octagon', 'diamond', 'plus'];
+
+export interface BoardGeometry {
+  id: BoardShapeId;
+  dim: number;
+  cellCount: number;
+  /** プレイ可能なセル index の昇順リスト。 */
+  active: number[];
+  /** 穴（プレイ不可）セル index の集合。 */
+  holes: Set<number>;
+  /** 同一層内の水平ライン（AI 評価ヒューリスティック用）。穴を含まない4連窓のみ。 */
+  winLines: number[][];
+}
+
+function buildGeometry(id: BoardShapeId): BoardGeometry {
+  const spec = SHAPE_SPECS[id];
+  const { dim } = spec;
+  const cellCount = dim * dim;
+  const active: number[] = [];
+  const holes = new Set<number>();
+  for (let i = 0; i < cellCount; i++) {
+    const r = Math.floor(i / dim);
+    const c = i % dim;
+    if (spec.active(r, c)) active.push(i);
+    else holes.add(i);
+  }
+  return { id, dim, cellCount, active, holes, winLines: buildWinLines(dim, holes) };
+}
+
+/** 行・列・両対角に沿う長さ4の窓のうち、穴を含まないものだけを列挙（AI ヒューリスティック用）。 */
+function buildWinLines(dim: number, holes: Set<number>): number[][] {
   const lines: number[][] = [];
-  // 行
-  for (let r = 0; r < BOARD_DIM; r++) {
-    lines.push([0, 1, 2, 3].map((c) => r * BOARD_DIM + c));
+  const ok = (idxs: number[]) => idxs.every((i) => !holes.has(i));
+  const push = (idxs: number[]) => {
+    if (ok(idxs)) lines.push(idxs);
+  };
+  const at = (r: number, c: number) => r * dim + c;
+  for (let r = 0; r < dim; r++) {
+    for (let c = 0; c + WIN_LEN <= dim; c++) push([0, 1, 2, 3].map((k) => at(r, c + k)));
   }
-  // 列
-  for (let c = 0; c < BOARD_DIM; c++) {
-    lines.push([0, 1, 2, 3].map((r) => r * BOARD_DIM + c));
+  for (let c = 0; c < dim; c++) {
+    for (let r = 0; r + WIN_LEN <= dim; r++) push([0, 1, 2, 3].map((k) => at(r + k, c)));
   }
-  // 対角
-  lines.push([0, 1, 2, 3].map((i) => i * BOARD_DIM + i));
-  lines.push([0, 1, 2, 3].map((i) => i * BOARD_DIM + (BOARD_DIM - 1 - i)));
+  for (let r = 0; r + WIN_LEN <= dim; r++) {
+    for (let c = 0; c + WIN_LEN <= dim; c++) {
+      push([0, 1, 2, 3].map((k) => at(r + k, c + k)));
+      push([0, 1, 2, 3].map((k) => at(r + k, c + WIN_LEN - 1 - k)));
+    }
+  }
   return lines;
 }
 
-export const WIN_LEN = 4;
+// 現在アクティブなジオメトリ（モジュール状態）。1対局中は不変で、対局／ルーム開始時に確定する。
+// App が毎レンダー冒頭で有効な形状に同期する（同一形状なら no-op）。
+let GEO: BoardGeometry = buildGeometry('square');
+
+/** 現在の盤形状を設定する（同一 id なら再計算しない）。 */
+export function setBoardShape(id: BoardShapeId): void {
+  if (GEO.id === id) return;
+  GEO = buildGeometry(id);
+}
+export function boardGeometry(): BoardGeometry {
+  return GEO;
+}
+export function boardDim(): number {
+  return GEO.dim;
+}
+export function boardCellCount(): number {
+  return GEO.cellCount;
+}
+/** そのセルがプレイ可能（穴でない）か。 */
+export function isActiveCell(cellIndex: number): boolean {
+  return cellIndex >= 0 && cellIndex < GEO.cellCount && !GEO.holes.has(cellIndex);
+}
+/** 各プレイヤーの総ピース数＝有効セル数×2（正方形=32 で従来どおり）。 */
+export function initialPieces(shape: BoardShapeId = GEO.id): number {
+  return buildGeometry(shape).active.length * 2;
+}
+/** AI 評価用の水平ライン（穴を含まない4連窓）。旧 WIN_LINES 相当。 */
+export function winLines(): number[][] {
+  return GEO.winLines;
+}
 
 // 盤面を 3D 格子 (x=列, y=高さ層, z=行) として扱い、全方向の直線4連を勝利とする。
 // 横（行・列・面内の斜め）・縦（同一マスに4段）・階段状（行/列/斜めに沿って1段ずつ上る）を
@@ -56,15 +138,18 @@ export const DIRECTIONS: Dir[] = (() => {
   return dirs; // 13 方向
 })();
 
-/** (col, row, layer) のピースを返す（中立ブロック 'b' を含みうる）。範囲外・未配置なら null。 */
+/** (col, row, layer) のピースを返す（中立ブロック 'b' を含みうる）。範囲外・穴・未配置なら null。 */
 export function pieceAt(board: Board, c: number, r: number, layer: number): StackPiece | null {
-  if (c < 0 || c >= BOARD_DIM || r < 0 || r >= BOARD_DIM || layer < 0) return null;
-  const stack = board[r * BOARD_DIM + c];
-  return layer < stack.length ? stack[layer] : null;
+  const dim = GEO.dim;
+  if (c < 0 || c >= dim || r < 0 || r >= dim || layer < 0) return null;
+  const idx = r * dim + c;
+  if (GEO.holes.has(idx)) return null; // 穴は常に空＝ラインを断つ
+  const stack = board[idx];
+  return stack && layer < stack.length ? stack[layer] : null;
 }
 
 export function createEmptyBoard(): Board {
-  return Array.from({ length: CELL_COUNT }, () => [] as Cell);
+  return Array.from({ length: GEO.cellCount }, () => [] as Cell);
 }
 
 export function cloneBoard(board: Board): Board {
@@ -74,7 +159,7 @@ export function cloneBoard(board: Board): Board {
 export const oppositeOf = (p: Player): Player => (p === 'o' ? 'x' : 'o');
 
 export function rowCol(cellIndex: number): [number, number] {
-  return [Math.floor(cellIndex / BOARD_DIM), cellIndex % BOARD_DIM];
+  return [Math.floor(cellIndex / GEO.dim), cellIndex % GEO.dim];
 }
 
 /** そのマスが満杯（MAX_STACK 到達）で、これ以上積めないか。 */
@@ -94,7 +179,7 @@ export function isBlock(p: StackPiece | null): p is typeof BLOCK {
 export function legalMoves(board: Board, piecesLeftForPlayer: number): number[] {
   if (piecesLeftForPlayer <= 0) return [];
   const moves: number[] = [];
-  for (let i = 0; i < CELL_COUNT; i++) {
+  for (const i of GEO.active) {
     if (board[i].length >= MAX_STACK) continue;
     moves.push(i);
   }
@@ -114,14 +199,14 @@ const TRAP_LAYER_POOL = [1, 1, 2, 2, 2, 3];
  * 層は低め(1〜3)に寄せ、ゲーム中に発動しやすく・不意すぎないバランスにする。
  */
 export function pickTraps(count: number): Trap[] {
-  const n = Math.max(0, Math.min(CELL_COUNT, Math.floor(count || 0)));
+  const pool = GEO.active.slice(); // 穴には仕掛けない
+  const n = Math.max(0, Math.min(pool.length, Math.floor(count || 0)));
   if (n === 0) return [];
-  const idx = Array.from({ length: CELL_COUNT }, (_, i) => i);
   for (let i = 0; i < n; i++) {
-    const j = i + Math.floor(Math.random() * (CELL_COUNT - i));
-    [idx[i], idx[j]] = [idx[j], idx[i]];
+    const j = i + Math.floor(Math.random() * (pool.length - i));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
   }
-  return idx.slice(0, n).map((cell) => ({
+  return pool.slice(0, n).map((cell) => ({
     cell,
     layer: TRAP_LAYER_POOL[Math.floor(Math.random() * TRAP_LAYER_POOL.length)],
   }));
@@ -168,8 +253,9 @@ export function applyMove(board: Board, cellIndex: number, player: Player): Boar
  * 横・縦・斜め・階段状のいずれかで同一プレイヤーが4連すると成立。
  */
 export function checkWinAt(board: Board, cellIndex: number, player: Player): WinLine | null {
-  const c = cellIndex % BOARD_DIM;
-  const r = Math.floor(cellIndex / BOARD_DIM);
+  const dim = GEO.dim;
+  const c = cellIndex % dim;
+  const r = Math.floor(cellIndex / dim);
   const layer = board[cellIndex].length - 1; // たった今置いた最上段
   if (layer < 0) return null;
 
@@ -185,9 +271,10 @@ export function checkWinAt(board: Board, cellIndex: number, player: Player): Win
 
 /** 盤面全体を走査して勝利ラインを探す（同期復元・保険用）。 */
 export function scanWin(board: Board): WinLine | null {
+  const dim = GEO.dim;
   const maxLayer = board.reduce((m, cell) => Math.max(m, cell.length), 0);
-  for (let r = 0; r < BOARD_DIM; r++) {
-    for (let c = 0; c < BOARD_DIM; c++) {
+  for (let r = 0; r < dim; r++) {
+    for (let c = 0; c < dim; c++) {
       for (let layer = 0; layer < maxLayer; layer++) {
         const p = pieceAt(board, c, r, layer);
         if (!p || isBlock(p)) continue; // 空 or 中立ブロックは起点にしない
@@ -212,13 +299,14 @@ function lineFrom(
   dl: number,
   player: Player,
 ): WinLine | null {
+  const dim = GEO.dim;
   const coords = [];
   for (let i = 0; i < WIN_LEN; i++) {
     const cc = c + i * dc;
     const rr = r + i * dr;
     const ll = layer + i * dl;
     if (pieceAt(board, cc, rr, ll) !== player) return null;
-    coords.push({ cell: rr * BOARD_DIM + cc, layer: ll });
+    coords.push({ cell: rr * dim + cc, layer: ll });
   }
   return { coords, player };
 }
@@ -242,7 +330,7 @@ export function recordToBoard(rec: Record<string, StackPiece[]> | null | undefin
   if (!rec) return board;
   for (const [k, v] of Object.entries(rec)) {
     const idx = Number(k);
-    if (idx >= 0 && idx < CELL_COUNT && Array.isArray(v)) board[idx] = v.slice();
+    if (idx >= 0 && idx < GEO.cellCount && Array.isArray(v)) board[idx] = v.slice();
   }
   return board;
 }
