@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import type { Group } from 'three';
 import type { Board, Player, WinLine } from '../types';
-import { BOARD_DIM, CELL_COUNT } from '../lib/gameLogic';
+import { BOARD_DIM, CELL_COUNT, MAX_STACK } from '../lib/gameLogic';
 import { Piece3D, layerY } from './Piece3D';
 
 const CELL = 1; // 1マスの一辺
@@ -19,6 +19,8 @@ export function cellToXZ(cellIndex: number): [number, number] {
 
 interface Board3DProps {
   board: Board;
+  /** 封鎖マス（ブロッカー）のセル番号。着手不可・専用マーカー表示。 */
+  blocked: number[];
   winLine: WinLine | null;
   canPlace: boolean;
   currentTurn: Player;
@@ -31,6 +33,7 @@ interface Board3DProps {
 
 export function Board3D({
   board,
+  blocked,
   winLine,
   canPlace,
   currentTurn,
@@ -41,6 +44,7 @@ export function Board3D({
   const [hovered, setHovered] = useState<number | null>(null);
   // 仮置きしているマス（1回目のクリックで設定、同じマスを再クリックで確定）。
   const [tentative, setTentative] = useState<number | null>(null);
+  const blockedSet = useMemo(() => new Set(blocked), [blocked]);
 
   // 自分の手番でなくなったら、または盤面が変わったら仮置きを破棄する。
   useEffect(() => {
@@ -67,6 +71,11 @@ export function Board3D({
       <gridHelper args={[BOARD_DIM, BOARD_DIM, '#2a2e38', '#2a2e38']} position={[0, 0.001, 0]}>
         <lineBasicMaterial attach="material" color="#2a2e38" transparent opacity={0.7} />
       </gridHelper>
+
+      {/* 封鎖マス（ブロッカー）マーカー。着手不可を示す暗いスラブ＋赤いバツ。 */}
+      {blocked.map((cell) => (
+        <BlockerMarker key={`blocker-${cell}`} cell={cell} />
+      ))}
 
       {/* ピース */}
       {board.map((stack, cell) => {
@@ -124,6 +133,8 @@ export function Board3D({
       {/* クリック判定用の透明プレーン（各マス） */}
       {Array.from({ length: CELL_COUNT }, (_, cell) => {
         const [x, z] = cellToXZ(cell);
+        // 満杯マス or 封鎖マスは着手不可。
+        const disabled = board[cell].length >= MAX_STACK || blockedSet.has(cell);
         return (
           <mesh
             key={`hit-${cell}`}
@@ -131,12 +142,12 @@ export function Board3D({
             rotation={[-Math.PI / 2, 0, 0]}
             onPointerOver={(e: ThreeEvent<PointerEvent>) => {
               e.stopPropagation();
-              if (canPlace) setHovered(cell);
+              if (canPlace && !disabled) setHovered(cell);
             }}
             onPointerOut={() => setHovered((h) => (h === cell ? null : h))}
             onClick={(e: ThreeEvent<MouseEvent>) => {
               e.stopPropagation();
-              if (!canPlace) return;
+              if (!canPlace || disabled) return;
               // 2クリック制: 1回目は仮置き、同じマスの2回目で確定。
               // 別マスをクリックした場合は仮置きをそのマスへ移動する。
               if (tentative === cell) {
@@ -152,6 +163,32 @@ export function Board3D({
           </mesh>
         );
       })}
+    </group>
+  );
+}
+
+/** 封鎖マス（ブロッカー）。着手不可のマスを暗いスラブ＋赤いバツで示す。 */
+function BlockerMarker({ cell }: { cell: number }) {
+  const [x, z] = cellToXZ(cell);
+  const barMat = { color: '#FF3B30', emissive: '#FF3B30', emissiveIntensity: 0.7 } as const;
+  return (
+    <group position={[x, 0, z]}>
+      {/* 台座スラブ（暗いハザード面） */}
+      <mesh position={[0, 0.03, 0]} castShadow receiveShadow>
+        <boxGeometry args={[0.86, 0.06, 0.86]} />
+        <meshStandardMaterial color="#15181f" roughness={0.7} metalness={0.2} />
+      </mesh>
+      {/* 赤いバツ（2本のバーを45°で交差） */}
+      <group position={[0, 0.075, 0]} rotation={[0, Math.PI / 4, 0]}>
+        <mesh>
+          <boxGeometry args={[0.62, 0.05, 0.11]} />
+          <meshStandardMaterial {...barMat} />
+        </mesh>
+        <mesh>
+          <boxGeometry args={[0.11, 0.05, 0.62]} />
+          <meshStandardMaterial {...barMat} />
+        </mesh>
+      </group>
     </group>
   );
 }

@@ -19,9 +19,11 @@ import {
 import { getDb } from '../lib/firebase';
 import {
   INITIAL_PIECES,
+  MAX_STACK,
   FIRST_PLAYER,
   applyMove,
   checkWinAt,
+  pickBlockedCells,
   recordToBoard,
 } from '../lib/gameLogic';
 import {
@@ -57,6 +59,7 @@ function initialRoom(): RoomData {
     createdAt: Date.now(),
     timeControl: DEFAULT_TIME_CONTROL,
     turnPref: 'o',
+    blockerCount: 0,
     score: { o: 0, x: 0 },
     teamMode: false,
     currentSeat: FIRST_PLAYER,
@@ -72,13 +75,18 @@ export interface UseFirebaseRoomResult {
   serverOffset: number;
   error: string | null;
   /** 新規ルームを作成して o（席1）として参加。teamMode=true で 2vs2 チーム戦。 */
-  createRoom: (timeControl?: TimeControl, turnPref?: TurnPref, teamMode?: boolean) => Promise<void>;
+  createRoom: (
+    timeControl?: TimeControl,
+    turnPref?: TurnPref,
+    teamMode?: boolean,
+    blockerCount?: number,
+  ) => Promise<void>;
   /** 既存ルームに参加（空きスロットを取得） */
   joinRoom: () => Promise<void>;
   /** ロビーから対戦開始（ホストのみ） */
   startGame: () => void;
-  /** ルーム設定（持ち時間・先手）を更新（ホストのみ・待機中） */
-  updateSettings: (timeControl: TimeControl, turnPref: TurnPref) => void;
+  /** ルーム設定（持ち時間・先手・封鎖マス数）を更新（ホストのみ・待機中） */
+  updateSettings: (timeControl: TimeControl, turnPref: TurnPref, blockerCount: number) => void;
   /** 自分のスロットの表示名を更新（ロビーで参加側も変更可能） */
   updateName: (name: string) => void;
   place: (cell: number) => void;
@@ -176,6 +184,7 @@ export function useFirebaseRoom(
       timeControl: TimeControl = DEFAULT_TIME_CONTROL,
       turnPref: TurnPref = 'o',
       teamMode = false,
+      blockerCount = 0,
     ) => {
       if (!roomId) return;
       setError(null);
@@ -184,6 +193,7 @@ export function useFirebaseRoom(
       base.timeControl = tc;
       base.turnPref = turnPref;
       base.teamMode = teamMode;
+      base.blockerCount = blockerCount;
       base.players.o = {
         name: playerName || 'O',
         connected: true,
@@ -249,6 +259,8 @@ export function useFirebaseRoom(
         turnStartedAt: serverTimestamp(),
         currentTurn: startTeam,
         currentSeat: startingSeat(startTeam),
+        // 開始時に封鎖マスをランダム抽選（両クライアントで同一になるようホストが確定）。
+        blockedCells: pickBlockedCells(cur.blockerCount ?? 0),
         // 開始時に両チームの持ち時間を確定（ロビーで設定変更されていても整合させる）。
         'players/o/timeRemaining': tc.baseMs,
         'players/x/timeRemaining': tc.baseMs,
@@ -269,7 +281,7 @@ export function useFirebaseRoom(
 
   // ルーム設定（持ち時間・先手）を更新。ホストのみ・待機中だけ許可。
   const updateSettings = useCallback(
-    (timeControl: TimeControl, turnPref: TurnPref) => {
+    (timeControl: TimeControl, turnPref: TurnPref, blockerCount: number) => {
       const cur = roomRef.current;
       if (!roomId || !cur) return;
       if (myRoleRef.current !== 'o' || cur.status !== 'waiting') return;
@@ -277,6 +289,7 @@ export function useFirebaseRoom(
       const updates: Record<string, unknown> = {
         timeControl: tc,
         turnPref,
+        blockerCount,
       };
       // 待機中の両者の表示用持ち時間も即時反映。
       if (cur.players.o) updates['players/o/timeRemaining'] = tc.baseMs;
@@ -287,12 +300,14 @@ export function useFirebaseRoom(
   );
 
   // 自分のスロットの表示名を更新（ロビー待機中に参加側/ホスト双方が変更可能）。
+  // チーム戦では自席(o/x/o2/x2)へ書く。myRole はチームに畳まれ O₂→o になり①の枠を
+  // 上書きしてしまうため、必ず mySeat を使う。
   const updateName = useCallback(
     (name: string) => {
-      const role = myRoleRef.current;
-      if (!roomId || !role) return;
-      const fallback = role === 'o' ? 'O' : 'X';
-      void update(dbRoom(), { [`players/${role}/name`]: name.trim() || fallback });
+      const seat = mySeatRef.current;
+      if (!roomId || !seat) return;
+      const fallback = seat.toUpperCase();
+      void update(dbRoom(), { [`players/${seat}/name`]: name.trim() || fallback });
     },
     [roomId, dbRoom],
   );
@@ -306,6 +321,8 @@ export function useFirebaseRoom(
       const activeSeat: Seat = cur.currentSeat ?? cur.currentTurn; // 旧ルーム後方互換
       if (cur.status !== 'playing' || cur.winner || activeSeat !== seat) return;
       if (cur.piecesLeft[team] <= 0) return;
+      if ((cur.board?.[cell]?.length ?? 0) >= MAX_STACK) return; // 満杯マスには置けない
+      if (cur.blockedCells?.includes(cell)) return; // 封鎖マスには置けない
 
       const now = Date.now() + offsetRef.current;
       const elapsed = Math.max(0, now - cur.turnStartedAt);
@@ -432,6 +449,8 @@ export function useFirebaseRoom(
         data.status = 'countdown';
         data.rematch = {};
         data.lastMove = null;
+        // 封鎖マスは countdown→playing の host effect で再抽選する。ここでは前局の封鎖を消す。
+        data.blockedCells = null;
         if (data.players.o) data.players.o.timeRemaining = tc.baseMs;
         if (data.players.x) data.players.x.timeRemaining = tc.baseMs;
       }

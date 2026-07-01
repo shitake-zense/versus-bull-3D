@@ -101,6 +101,10 @@ export interface RoomData {
   rematch?: { o?: boolean; x?: boolean };
   /** 持ち時間設定（ホストが設定。未設定の旧ルームはデフォルト 5分+15秒） */
   timeControl?: TimeControl;
+  /** 封鎖マス（ブロッカー）の個数（ホストが設定。未設定は 0＝なし） */
+  blockerCount?: number;
+  /** 封鎖マスのセル番号。対局開始・再戦のたびにホストがランダム抽選して書く。 */
+  blockedCells?: number[] | null;
   /** 先手の希望（ホスト視点。o=ホスト先攻 / x=ホスト後攻 / random）。開始時に解決 */
   turnPref?: TurnPref;
   /** セッション通算スコア（room で一元管理。再戦で伸び、両クライアントで一致する） */

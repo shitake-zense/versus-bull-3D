@@ -9,6 +9,8 @@ import { layerY } from './Piece3D';
 
 interface Scene3DProps {
   board: Board;
+  /** 封鎖マス（ブロッカー）のセル番号。着手不可・専用マーカー表示。 */
+  blocked: number[];
   winLine: WinLine | null;
   canPlace: boolean;
   currentTurn: Player;
@@ -69,6 +71,7 @@ export function Scene3D(props: Scene3DProps) {
 
       <Board3D
         board={board}
+        blocked={props.blocked}
         winLine={winLine}
         canPlace={props.canPlace}
         currentTurn={props.currentTurn}

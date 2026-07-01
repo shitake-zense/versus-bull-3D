@@ -42,6 +42,8 @@ const IMMEDIATE_MULT = 6;
 
 interface SearchCtx {
   ai: Player;
+  /** 封鎖マス（ブロッカー）のセル番号。合法手から除外する。 */
+  blocked?: readonly number[];
 }
 
 const ABORT = Symbol('abort');
@@ -62,9 +64,10 @@ export function getBestMove(
   piecesLeft: Record<Player, number>,
   aiPlayer: Player,
   level: AiLevel = 'hard',
+  blocked: readonly number[] = [],
 ): number | null {
   const cfg = LEVELS[level];
-  const rootMoves = orderedMoves(board, legalMoves(piecesLeft[aiPlayer]));
+  const rootMoves = orderedMoves(board, legalMoves(board, piecesLeft[aiPlayer], blocked));
   if (rootMoves.length === 0) return null;
 
   // ミス率: 一定確率でランダムな合法手を選ぶ（即勝ち判定より前なので必勝も見逃しうる）。
@@ -77,7 +80,7 @@ export function getBestMove(
     if (checkWinAt(applyMove(board, m, aiPlayer), m, aiPlayer)) return m;
   }
 
-  const ctx: SearchCtx = { ai: aiPlayer };
+  const ctx: SearchCtx = { ai: aiPlayer, blocked };
   deadline = performance.now() + cfg.timeBudgetMs;
   nodeCounter = 0;
   let bestMove = rootMoves[0];
@@ -104,7 +107,7 @@ function rootSearch(
   prevBest: number,
   ctx: SearchCtx,
 ): { move: number; score: number } {
-  const moves = orderedMoves(board, legalMoves(piecesLeft[aiPlayer]));
+  const moves = orderedMoves(board, legalMoves(board, piecesLeft[aiPlayer], ctx.blocked));
   const ordered = [prevBest, ...moves.filter((m) => m !== prevBest)];
 
   let bestMove = ordered[0];
@@ -136,7 +139,7 @@ function minimax(
   ctx: SearchCtx,
 ): number {
   checkTime();
-  const moves = orderedMoves(board, legalMoves(piecesLeft[turn]));
+  const moves = orderedMoves(board, legalMoves(board, piecesLeft[turn], ctx.blocked));
   if (depth === 0 || moves.length === 0) {
     return evaluate(board, ctx.ai);
   }

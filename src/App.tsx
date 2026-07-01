@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AiLevel, GameMode, Move, Player, Seat, TimeControl, TurnPref } from './types';
 import {
+  MAX_STACK,
   applyMove,
   boardFromMoves,
   checkWinAt,
@@ -36,6 +37,8 @@ export default function App() {
   // AI対戦の手番希望（'o'|'x'|'random'）。再戦時の random 再抽選に使う。
   const [aiTurnPref, setAiTurnPref] = useState<TurnPref>('o');
   const [timeControl, setTimeControl] = useState<TimeControl>(DEFAULT_TIME_CONTROL);
+  // 封鎖マス（ブロッカー）の個数。ローカル/AI/オンライン作成時の共通設定。
+  const [blockerCount, setBlockerCount] = useState(0);
 
   const [roomId, setRoomId] = useState<string | null>(null);
   const [intent, setIntent] = useState<Intent>(null);
@@ -71,7 +74,7 @@ export default function App() {
   const [replayIndex, setReplayIndex] = useState<number | null>(null);
   const [replayPlaying, setReplayPlaying] = useState(false);
 
-  const offline = useGameLogic({ mode: mode ?? 'local', aiPlayer, aiLevel, timeControl });
+  const offline = useGameLogic({ mode: mode ?? 'local', aiPlayer, aiLevel, timeControl, blockerCount });
   const fb = useFirebaseRoom(mode === 'online' ? roomId : null, playerName);
 
   const isOnline = mode === 'online';
@@ -92,10 +95,10 @@ export default function App() {
   // ---- create / join の実行 ----
   useEffect(() => {
     if (!isOnline || !roomId || !intent) return;
-    if (intent === 'create') void fb.createRoom(timeControl, 'o', pendingTeamMode);
+    if (intent === 'create') void fb.createRoom(timeControl, 'o', pendingTeamMode, blockerCount);
     else void fb.joinRoom();
     setIntent(null);
-  }, [isOnline, roomId, intent, fb, timeControl, pendingTeamMode]);
+  }, [isOnline, roomId, intent, fb, timeControl, pendingTeamMode, blockerCount]);
 
   // ---- 派生状態（モード非依存ビュー） ----
   const status = isOnline
@@ -129,6 +132,12 @@ export default function App() {
     ? room?.piecesLeft ?? { o: 32, x: 32 }
     : offline.state.piecesLeft;
 
+  // 封鎖マス（ブロッカー）。オンラインはルーム値、ローカル/AI は offline 状態。
+  const blocked = useMemo<number[]>(
+    () => (isOnline ? room?.blockedCells ?? [] : offline.state.blocked),
+    [isOnline, room?.blockedCells, offline.state.blocked],
+  );
+
   // リーチ警告: 相手が「次に1手で4連を作れる」マス（＝今ブロックすべき脅威）。
   const threats = useMemo(() => {
     if (!running) return [];
@@ -136,11 +145,13 @@ export default function App() {
     if (piecesLeft[opp] <= 0) return [];
     const res: { cell: number; layer: number }[] = [];
     for (let c = 0; c < board.length; c++) {
+      if (board[c].length >= MAX_STACK) continue; // 満杯マスは着地不可＝脅威にならない
+      if (blocked.includes(c)) continue; // 封鎖マスは着地不可＝脅威にならない
       const next = applyMove(board, c, opp);
       if (checkWinAt(next, c, opp)) res.push({ cell: c, layer: board[c].length });
     }
     return res;
-  }, [running, board, activePlayer, piecesLeft]);
+  }, [running, board, activePlayer, piecesLeft, blocked]);
 
   // 有効な持ち時間設定（オンラインはルーム値、ローカル/AI は App 状態）。
   const activeTimeControl = useMemo(
@@ -535,6 +546,7 @@ export default function App() {
     <div className="relative h-full w-full overflow-hidden bg-bg-void">
       <Scene3D
         board={viewBoard}
+        blocked={blocked}
         winLine={viewWinLine}
         canPlace={canPlace && !isReplaying}
         currentTurn={activePlayer}
@@ -595,6 +607,8 @@ export default function App() {
           onChangeName={handleChangeName}
           timeControl={timeControl}
           setTimeControl={setTimeControl}
+          blockerCount={blockerCount}
+          setBlockerCount={setBlockerCount}
           onChangeSettings={fb.updateSettings}
           onLocal={beginLocal}
           onAI={beginAI}

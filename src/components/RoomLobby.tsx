@@ -5,6 +5,7 @@ import type { AiLevel, Player, RoomData, Seat, TimeControl, TurnPref } from '../
 import { isFirebaseConfigured } from '../lib/firebase';
 import { AI_LEVEL_LABEL, TEAM } from '../lib/teams';
 import { requiredSeats, seatTeam, seatSuffix } from '../lib/seats';
+import { BLOCKER_PRESETS } from '../lib/gameLogic';
 import {
   BASE_PRESETS,
   INCREMENT_PRESETS,
@@ -34,8 +35,11 @@ interface RoomLobbyProps {
   /** ローカル/AI/オンライン作成に使う持ち時間設定 */
   timeControl: TimeControl;
   setTimeControl: (tc: TimeControl) => void;
-  /** オンラインのロビーでホストが設定を変更（持ち時間・先手） */
-  onChangeSettings: (tc: TimeControl, pref: TurnPref) => void;
+  /** 封鎖マス（ブロッカー）の個数。ローカル/AI/オンライン作成の共通設定 */
+  blockerCount: number;
+  setBlockerCount: (n: number) => void;
+  /** オンラインのロビーでホストが設定を変更（持ち時間・先手・封鎖マス数） */
+  onChangeSettings: (tc: TimeControl, pref: TurnPref, blockerCount: number) => void;
   onLocal: () => void;
   onAI: (pref: TurnPref, level: AiLevel) => void;
   /** オンラインルーム作成。teamMode=true で 2vs2 チーム戦 */
@@ -54,6 +58,8 @@ export function RoomLobby({
   onChangeName,
   timeControl,
   setTimeControl,
+  blockerCount,
+  setBlockerCount,
   onChangeSettings,
   onLocal,
   onAI,
@@ -104,6 +110,7 @@ export function RoomLobby({
     const isHost = waiting.mySeat === 'o';
     const roomTc = normalizeTimeControl(waiting.room?.timeControl);
     const roomPref: TurnPref = waiting.room?.turnPref ?? 'o';
+    const roomBlocker = waiting.room?.blockerCount ?? 0;
     const myTeam = mySeat ? seatTeam(mySeat) : null;
     const myLabel = mySeat
       ? teamMode
@@ -194,15 +201,24 @@ export function RoomLobby({
             <div className="mt-2.5 flex flex-col gap-2">
               <TimeControlPicker
                 value={roomTc}
-                onChange={(tc) => onChangeSettings(tc, roomPref)}
+                onChange={(tc) => onChangeSettings(tc, roomPref, roomBlocker)}
               />
-              <TurnOrderPicker value={roomPref} onChange={(p) => onChangeSettings(roomTc, p)} />
+              <TurnOrderPicker
+                value={roomPref}
+                onChange={(p) => onChangeSettings(roomTc, p, roomBlocker)}
+              />
+              <BlockerPicker
+                value={roomBlocker}
+                onChange={(n) => onChangeSettings(roomTc, roomPref, n)}
+              />
             </div>
           ) : (
             <div className="mt-2">
               持ち時間: <span className="text-white">{formatTimeControl(roomTc)}</span>
               <span className="mx-2 opacity-50">/</span>
               先手: <span className="text-white">{turnPrefLabel(roomPref)}</span>
+              <span className="mx-2 opacity-50">/</span>
+              封鎖マス: <span className="text-white">{roomBlocker === 0 ? 'なし' : `${roomBlocker}マス`}</span>
             </div>
           )}
         </div>
@@ -267,6 +283,9 @@ export function RoomLobby({
         </label>
         <div className="rounded-lg border border-col-border bg-bg-surface px-3 py-2">
           <TimeControlPicker value={timeControl} onChange={setTimeControl} />
+          <div className="mt-2 border-t border-col-border/60 pt-2">
+            <BlockerPicker value={blockerCount} onChange={setBlockerCount} />
+          </div>
         </div>
       </div>
 
@@ -480,6 +499,32 @@ function TurnOrderPicker({
             className={`flex-1 py-1 ${value === o.v ? 'bg-col-gold/20 text-white' : 'text-col-ui'}`}
           >
             {o.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** 封鎖マス（ブロッカー）の個数ピッカー。開始時にランダムで置けないマスを配置する。 */
+function BlockerPicker({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (n: number) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-10 shrink-0 text-[10px] uppercase tracking-wider text-col-ui">封鎖</span>
+      <div className="flex flex-1 overflow-hidden rounded-md border border-col-border">
+        {BLOCKER_PRESETS.map((n) => (
+          <button
+            key={n}
+            onClick={() => onChange(n)}
+            className={`flex-1 py-1 text-xs ${value === n ? 'bg-col-gold/20 text-white' : 'text-col-ui'}`}
+          >
+            {n === 0 ? 'なし' : `${n}`}
           </button>
         ))}
       </div>

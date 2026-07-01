@@ -66,7 +66,7 @@ export function CameraController({ pendingView, onConsumed }: CameraControllerPr
       ref={controlsRef}
       enablePan={false}
       minDistance={4.5}
-      maxDistance={16}
+      maxDistance={20}
       minPolarAngle={0.05}
       maxPolarAngle={Math.PI * 0.49}
       target={[0, 0.4, 0]}

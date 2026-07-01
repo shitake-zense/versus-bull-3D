@@ -6,6 +6,7 @@ import type { Board, Cell, Move, Player, WinLine } from '../types';
 export const BOARD_DIM = 4; // 4×4
 export const CELL_COUNT = BOARD_DIM * BOARD_DIM; // 16
 export const INITIAL_PIECES = 32; // 各プレイヤーの総ピース数
+export const MAX_STACK = 10; // 1マスに積める最大段数（これ以上は着手不可）
 export const START_TIME_MS = 300_000; // 初期持ち時間 5分
 export const INCREMENT_MS = 15_000; // フィッシャー加算 +15秒
 export const FIRST_PLAYER: Player = 'o';
@@ -75,13 +76,44 @@ export function rowCol(cellIndex: number): [number, number] {
   return [Math.floor(cellIndex / BOARD_DIM), cellIndex % BOARD_DIM];
 }
 
+/** そのマスが満杯（MAX_STACK 到達）で、これ以上積めないか。 */
+export function isCellFull(board: Board, cellIndex: number): boolean {
+  return board[cellIndex].length >= MAX_STACK;
+}
+
+/** 封鎖マス（ブロッカー）の選択肢。対局開始時にこの個数をランダム封鎖する。 */
+export const BLOCKER_PRESETS = [0, 1, 2, 3] as const;
+
+/** ランダムに count 個の異なるセル(0..15)を封鎖マスとして選ぶ（昇順で返す）。 */
+export function pickBlockedCells(count: number): number[] {
+  const n = Math.max(0, Math.min(CELL_COUNT, Math.floor(count || 0)));
+  if (n === 0) return [];
+  const idx = Array.from({ length: CELL_COUNT }, (_, i) => i);
+  // Fisher-Yates で先頭 n 個をシャッフル抽出。
+  for (let i = 0; i < n; i++) {
+    const j = i + Math.floor(Math.random() * (CELL_COUNT - i));
+    [idx[i], idx[j]] = [idx[j], idx[i]];
+  }
+  return idx.slice(0, n).sort((a, b) => a - b);
+}
+
 /**
- * 合法手の列挙。高さ制限が無いため、手持ちが残っていれば全16マスが合法。
- * TODO(blocker): 将来ブロッカーピースを導入する場合はここで対象マスを除外する。
+ * 合法手の列挙。手持ちが残っていて、MAX_STACK 未満、かつ封鎖マスでないマスが合法。
+ * blocked は封鎖マス（ブロッカー）のセル番号配列（省略時は封鎖なし）。
  */
-export function legalMoves(piecesLeftForPlayer: number): number[] {
+export function legalMoves(
+  board: Board,
+  piecesLeftForPlayer: number,
+  blocked?: readonly number[],
+): number[] {
   if (piecesLeftForPlayer <= 0) return [];
-  return Array.from({ length: CELL_COUNT }, (_, i) => i);
+  const moves: number[] = [];
+  for (let i = 0; i < CELL_COUNT; i++) {
+    if (board[i].length >= MAX_STACK) continue;
+    if (blocked && blocked.includes(i)) continue;
+    moves.push(i);
+  }
+  return moves;
 }
 
 /** 着手を適用した新しい盤面を返す（元の board は変更しない）。 */
