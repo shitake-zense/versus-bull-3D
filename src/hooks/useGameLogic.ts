@@ -32,11 +32,15 @@ interface LocalState {
 }
 
 export interface UseGameLogicOptions {
-  mode: GameMode; // 'local' | 'ai'（'online' では使用しない）
+  mode: GameMode; // 'local' | 'ai' | 'watch'（'online' では使用しない）
   /** AIモードでAIが操作する側 */
   aiPlayer?: Player;
-  /** AIの強さ */
+  /** AIの強さ（'ai' モードの aiPlayer 側） */
   aiLevel?: AiLevel;
+  /** AI観戦（'watch'）での O 側の強さ */
+  watchLevelO?: AiLevel;
+  /** AI観戦（'watch'）での X 側の強さ */
+  watchLevelX?: AiLevel;
   /** 持ち時間設定 */
   timeControl?: TimeControl;
   /** 落下ブロック（トラップ）の個数。対局開始時にランダム配置。 */
@@ -62,6 +66,8 @@ export function useGameLogic({
   mode,
   aiPlayer = 'x',
   aiLevel = 'hard',
+  watchLevelO = 'hard',
+  watchLevelX = 'hard',
   timeControl = DEFAULT_TIME_CONTROL,
   trapCount = 0,
   onPlace,
@@ -85,6 +91,15 @@ export function useGameLogic({
   cbRef.current = { onPlace, onWin };
 
   const humanPlayer: Player = mode === 'ai' ? oppositeOf(aiPlayer) : FIRST_PLAYER;
+
+  // AIが操作する側とその強さ。'ai'=片側のみ / 'watch'=両側 / それ以外=なし。
+  const aiSides = useMemo<Partial<Record<Player, AiLevel>>>(() => {
+    if (mode === 'ai') return { [aiPlayer]: aiLevel };
+    if (mode === 'watch') return { o: watchLevelO, x: watchLevelX };
+    return {};
+  }, [mode, aiPlayer, aiLevel, watchLevelO, watchLevelX]);
+  const aiSidesRef = useRef(aiSides);
+  aiSidesRef.current = aiSides;
 
   /** カウントダウン後に呼んでゲーム開始（タイマー始動） */
   const start = useCallback(() => {
@@ -177,6 +192,7 @@ export function useGameLogic({
 
   const canUndo = useMemo(() => {
     if (!running || s.winner) return false;
+    if (mode === 'watch') return false; // 観戦は手戻し不可
     if (mode === 'ai') {
       return s.currentTurn === humanPlayer && history.some((h) => h.currentTurn === humanPlayer);
     }
@@ -217,22 +233,28 @@ export function useGameLogic({
     setHistory([]);
   }, []);
 
-  // AI の自動着手: AIの手番になったら 500〜900ms 後に最善手を置く。
+  // AI の自動着手: AIが操作する手番になったら 500〜900ms 後に最善手を置く。
+  // 'watch'（AI vs AI）では両手番が AI なので、対局終了まで交互に自動進行する。
   useEffect(() => {
-    if (mode !== 'ai' || !running || s.winner) return;
-    if (s.currentTurn !== aiPlayer) return;
+    if (!running || s.winner) return;
+    if (!aiSides[s.currentTurn]) return;
     const delay = 500 + Math.random() * 400;
     const t = setTimeout(() => {
       const cur = sRef.current;
-      if (cur.winner || cur.currentTurn !== aiPlayer) return;
-      const move = getBestMove(cur.board, cur.piecesLeft, aiPlayer, aiLevel, cur.traps);
+      const level = aiSidesRef.current[cur.currentTurn];
+      if (cur.winner || !level) return;
+      const move = getBestMove(cur.board, cur.piecesLeft, cur.currentTurn, level, cur.traps);
       if (move !== null) place(move);
     }, delay);
     return () => clearTimeout(t);
-  }, [mode, running, s.currentTurn, s.winner, s.turnStartedAt, aiPlayer, aiLevel, place]);
+  }, [running, s.currentTurn, s.winner, s.turnStartedAt, aiSides, place]);
 
   const canHumanPlace = useMemo(
-    () => running && !s.winner && (mode === 'local' || s.currentTurn === humanPlayer),
+    // 'watch'（AI vs AI）は観戦のみ＝人間は着手できない。
+    () =>
+      running &&
+      !s.winner &&
+      (mode === 'local' || (mode === 'ai' && s.currentTurn === humanPlayer)),
     [running, s.winner, s.currentTurn, mode, humanPlayer],
   );
 

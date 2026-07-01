@@ -36,7 +36,7 @@ export interface Move {
   player: Player;
 }
 
-export type GameMode = 'online' | 'local' | 'ai';
+export type GameMode = 'online' | 'local' | 'ai' | 'watch';
 
 /** AI の強さ。easy=接待〜max=全力。useGameLogic / ai.ts で参照。 */
 export type AiLevel = 'easy' | 'normal' | 'hard' | 'max';

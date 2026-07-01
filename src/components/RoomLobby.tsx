@@ -42,6 +42,8 @@ interface RoomLobbyProps {
   onChangeSettings: (tc: TimeControl, pref: TurnPref, trapCount: number) => void;
   onLocal: () => void;
   onAI: (pref: TurnPref, level: AiLevel) => void;
+  /** AI観戦（AI vs AI）を開始。O側・X側の強さを指定 */
+  onWatch: (levelO: AiLevel, levelX: AiLevel) => void;
   /** オンラインルーム作成。teamMode=true で 2vs2 チーム戦 */
   onCreateRoom: (teamMode: boolean) => void;
   waiting: WaitingState | null;
@@ -63,6 +65,7 @@ export function RoomLobby({
   onChangeSettings,
   onLocal,
   onAI,
+  onWatch,
   onCreateRoom,
   waiting,
   onStartGame,
@@ -72,6 +75,9 @@ export function RoomLobby({
 }: RoomLobbyProps) {
   const [aiSide, setAiSide] = useState<TurnPref>('o');
   const [aiLevel, setAiLevel] = useState<AiLevel>('normal');
+  // AI観戦（AI vs AI）の両陣営の強さ。
+  const [watchLevelO, setWatchLevelO] = useState<AiLevel>('hard');
+  const [watchLevelX, setWatchLevelX] = useState<AiLevel>('hard');
   const [copied, setCopied] = useState(false);
   const [createTeamMode, setCreateTeamMode] = useState(false); // 1vs1 / 2vs2 切替（作成時）
 
@@ -378,6 +384,25 @@ export function RoomLobby({
             ・{AI_LEVEL_LABEL[aiLevel]}で参戦
           </button>
         </div>
+
+        <div className="rounded-lg border border-col-border bg-bg-surface px-5 py-4">
+          <div>
+            <div className="font-display text-lg text-white">AI観戦（AI vs AI）</div>
+            <div className="text-xs text-col-ui">両陣営の強さを選んで自動対局を観る</div>
+          </div>
+
+          <div className="mt-3 flex flex-col gap-2">
+            <WatchLevelPicker teamLabel="ORIGIN（先攻・白）" value={watchLevelO} onChange={setWatchLevelO} />
+            <WatchLevelPicker teamLabel="XENOGENESIS（後攻・黒）" value={watchLevelX} onChange={setWatchLevelX} />
+          </div>
+
+          <button
+            onClick={() => onWatch(watchLevelO, watchLevelX)}
+            className="mt-3 w-full rounded-md border border-col-gold/50 bg-bg-void py-2 text-sm text-white hover:bg-col-gold/10"
+          >
+            観戦を開始（{AI_LEVEL_LABEL[watchLevelO]} vs {AI_LEVEL_LABEL[watchLevelX]}）
+          </button>
+        </div>
       </div>
 
       <BgmToggle on={bgmOn} onToggle={onToggleBgm} />
@@ -499,6 +524,34 @@ function TurnOrderPicker({
             className={`flex-1 py-1 ${value === o.v ? 'bg-col-gold/20 text-white' : 'text-col-ui'}`}
           >
             {o.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** AI観戦の陣営ごとの強さピッカー（易/普/強/最）。 */
+function WatchLevelPicker({
+  teamLabel,
+  value,
+  onChange,
+}: {
+  teamLabel: string;
+  value: AiLevel;
+  onChange: (lv: AiLevel) => void;
+}) {
+  return (
+    <div>
+      <div className="mb-1 text-[10px] uppercase tracking-wider text-col-ui">{teamLabel}</div>
+      <div className="grid grid-cols-4 overflow-hidden rounded-md border border-col-border text-xs">
+        {(['easy', 'normal', 'hard', 'max'] as AiLevel[]).map((lv) => (
+          <button
+            key={lv}
+            onClick={() => onChange(lv)}
+            className={`py-1.5 ${value === lv ? 'bg-col-gold/20 text-white' : 'text-col-ui'}`}
+          >
+            {AI_LEVEL_LABEL[lv]}
           </button>
         ))}
       </div>

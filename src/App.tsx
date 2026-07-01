@@ -35,6 +35,9 @@ export default function App() {
   const [playerName, setPlayerName] = useState('');
   const [aiPlayer, setAiPlayer] = useState<Player>('x');
   const [aiLevel, setAiLevel] = useState<AiLevel>('normal');
+  // AI観戦（AI vs AI）の両陣営の強さ。
+  const [watchLevelO, setWatchLevelO] = useState<AiLevel>('hard');
+  const [watchLevelX, setWatchLevelX] = useState<AiLevel>('hard');
   // AI対戦の手番希望（'o'|'x'|'random'）。再戦時の random 再抽選に使う。
   const [aiTurnPref, setAiTurnPref] = useState<TurnPref>('o');
   const [timeControl, setTimeControl] = useState<TimeControl>(DEFAULT_TIME_CONTROL);
@@ -94,7 +97,15 @@ export default function App() {
   const [replayIndex, setReplayIndex] = useState<number | null>(null);
   const [replayPlaying, setReplayPlaying] = useState(false);
 
-  const offline = useGameLogic({ mode: mode ?? 'local', aiPlayer, aiLevel, timeControl, trapCount });
+  const offline = useGameLogic({
+    mode: mode ?? 'local',
+    aiPlayer,
+    aiLevel,
+    watchLevelO,
+    watchLevelX,
+    timeControl,
+    trapCount,
+  });
   const fb = useFirebaseRoom(mode === 'online' ? roomId : null, playerName);
 
   const isOnline = mode === 'online';
@@ -400,6 +411,18 @@ export default function App() {
     [startOfflineRound],
   );
 
+  // AI観戦（AI vs AI）を開始。両陣営の強さを指定してカウントダウン→自動進行。
+  const beginWatch = useCallback(
+    (levelO: AiLevel, levelX: AiLevel) => {
+      setWatchLevelO(levelO);
+      setWatchLevelX(levelX);
+      setMode('watch');
+      setRoomId(null);
+      requestAnimationFrame(startOfflineRound);
+    },
+    [startOfflineRound],
+  );
+
   const shareUrl = useMemo(() => {
     if (!roomId) return '';
     const { origin, pathname } = window.location;
@@ -523,8 +546,14 @@ export default function App() {
       const cpuName = `${TEAM[ai].name}（CPU・${AI_LEVEL_LABEL[aiLevel]}）`;
       return human === 'o' ? { o: youName, x: cpuName } : { o: cpuName, x: youName };
     }
+    if (mode === 'watch') {
+      return {
+        o: `${TEAM.o.name}（CPU・${AI_LEVEL_LABEL[watchLevelO]}）`,
+        x: `${TEAM.x.name}（CPU・${AI_LEVEL_LABEL[watchLevelX]}）`,
+      };
+    }
     return { o: TEAM.o.name, x: TEAM.x.name };
-  }, [isOnline, teamMode, room?.players, mode, playerName, aiLevel, offline.humanPlayer, offline.aiPlayer]);
+  }, [isOnline, teamMode, room?.players, mode, playerName, aiLevel, watchLevelO, watchLevelX, offline.humanPlayer, offline.aiPlayer]);
 
   // チーム戦のメンバー名簿（手番ハイライト用）。
   const roster = useMemo(
@@ -641,6 +670,7 @@ export default function App() {
           onChangeSettings={fb.updateSettings}
           onLocal={beginLocal}
           onAI={beginAI}
+          onWatch={beginWatch}
           onCreateRoom={createRoom}
           waiting={waiting}
           onStartGame={fb.startGame}
