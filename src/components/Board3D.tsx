@@ -185,25 +185,25 @@ function TrapTelegraph({ cell, layer }: { cell: number; layer: number }) {
     const t = performance.now() / 1000;
     const pulse = 0.5 + 0.5 * Math.sin(t * 3);
     if (ref.current) {
-      const s = 1 + 0.1 * pulse;
+      const s = 1 + 0.05 * pulse;
       ref.current.scale.set(s, 1, s);
     }
     // ゴースト球体はゆっくり上下に漂う＝「降ってくる」予感。
-    if (ghostRef.current) ghostRef.current.position.y = 0.12 * Math.sin(t * 2);
+    if (ghostRef.current) ghostRef.current.position.y = 0.08 * Math.sin(t * 2);
   });
 
   return (
     <group position={[x, y, z]}>
-      {/* 着地位置を示す琥珀リング（水平） */}
+      {/* 着地位置を示す琥珀リング（水平・控えめ） */}
       <group ref={ref}>
         <mesh rotation={[-Math.PI / 2, 0, 0]}>
-          <torusGeometry args={[0.44, 0.045, 12, 40]} />
+          <torusGeometry args={[0.44, 0.03, 12, 40]} />
           <meshStandardMaterial
             color="#FFB020"
             emissive="#FFB020"
-            emissiveIntensity={1.2}
+            emissiveIntensity={0.5}
             transparent
-            opacity={0.85}
+            opacity={0.4}
           />
         </mesh>
       </group>
@@ -214,18 +214,24 @@ function TrapTelegraph({ cell, layer }: { cell: number; layer: number }) {
           <meshStandardMaterial
             color="#B9C0CC"
             emissive="#FFB020"
-            emissiveIntensity={0.25}
+            emissiveIntensity={0.12}
             roughness={0.9}
             metalness={0.1}
             transparent
-            opacity={0.4}
+            opacity={0.22}
           />
         </mesh>
       </group>
-      {/* 落下方向を示す下向きチェブロン（上方に配置） */}
+      {/* 落下方向を示す下向きチェブロン（上方に配置・控えめ） */}
       <mesh position={[0, 0.5, 0]} rotation={[Math.PI, 0, 0]}>
-        <coneGeometry args={[0.14, 0.24, 4]} />
-        <meshStandardMaterial color="#FFB020" emissive="#FFB020" emissiveIntensity={1} />
+        <coneGeometry args={[0.1, 0.18, 4]} />
+        <meshStandardMaterial
+          color="#FFB020"
+          emissive="#FFB020"
+          emissiveIntensity={0.4}
+          transparent
+          opacity={0.5}
+        />
       </mesh>
     </group>
   );
