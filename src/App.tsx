@@ -5,7 +5,6 @@ import type { AiLevel, BoardShapeId, GameMode, Player, Seat, TimeControl, TurnPr
 import {
   isCellFull,
   applyMove,
-  boardFromMoves,
   checkWinAt,
   initialPieces,
   isActiveCell,
@@ -22,6 +21,7 @@ import { useGameLogic } from './hooks/useGameLogic';
 import { useFirebaseRoom } from './hooks/useFirebaseRoom';
 import { useFisherClock } from './hooks/useFisherClock';
 import { useMoveHistory } from './hooks/useMoveHistory';
+import { useReplay } from './hooks/useReplay';
 import { useSound } from './hooks/useSound';
 import { useBgm } from './hooks/useBgm';
 import { Scene3D } from './components/Scene3D';
@@ -97,10 +97,6 @@ export default function App() {
   }, []);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [offlineCountingDown, setOfflineCountingDown] = useState(false);
-
-  // リプレイ: replayIndex=null は通常表示。数値なら棋譜を先頭から replayIndex 手だけ再現する。
-  const [replayIndex, setReplayIndex] = useState<number | null>(null);
-  const [replayPlaying, setReplayPlaying] = useState(false);
 
   const offline = useGameLogic({
     mode: mode ?? 'local',
@@ -263,78 +259,32 @@ export default function App() {
   }, [isOnline, status, runCountdown]);
 
   // ---- 効果音＋直前着手の検知＋棋譜蓄積（盤面のピース増加で検知＝ローカル/リモート/AI 共通） ----
-  const { lastMove, moveHistory } = useMoveHistory(board, playPlace, () => {
-    // 盤面が空にリセットされたら（新規対局・再戦）リプレイ表示を消す。
-    setReplayIndex(null);
-    setReplayPlaying(false);
-  });
+  // 盤面リセット時にリプレイ状態を消すが、リプレイフックは棋譜を必要とするため後で定義される。
+  // 宣言順の都合で ref 経由でそのリセット関数を呼ぶ。
+  const replayResetRef = useRef<() => void>(() => {});
+  const { lastMove, moveHistory } = useMoveHistory(board, playPlace, () => replayResetRef.current());
 
   useEffect(() => {
     if (winner === 'o' || winner === 'x') playWin();
   }, [winner, playWin]);
 
-  // ---- リプレイの表示用ビュー（replayIndex が立っている間は棋譜から盤面を再現） ----
-  const isReplaying = replayIndex !== null;
-  const viewBoard = useMemo(
-    () => (replayIndex !== null ? boardFromMoves(moveHistory, replayIndex, traps) : board),
-    [replayIndex, moveHistory, board, traps],
-  );
-  const viewLastMove = useMemo(() => {
-    if (replayIndex === null) return lastMove;
-    if (replayIndex <= 0) return null;
-    const m = moveHistory[replayIndex - 1];
-    return { cell: m.cell, layer: viewBoard[m.cell].length - 1 };
-  }, [replayIndex, moveHistory, viewBoard, lastMove]);
-  // 勝利ラインは最終局面でのみ表示（途中局面ではまだ揃っていない）。
-  const viewWinLine = isReplaying && replayIndex < moveHistory.length ? null : winLine;
+  // ---- リプレイ（終局後の棋譜再現）。表示用の盤面・直前手・勝ちラインと操作一式を得る ----
+  const replay = useReplay({ moveHistory, board, traps, lastMove, winLine });
+  replayResetRef.current = replay.exit; // 盤面リセット時のリセットに使う
+  const {
+    isReplaying,
+    replayIndex,
+    replayPlaying,
+    viewBoard,
+    viewLastMove,
+    viewWinLine,
+    enter: enterReplay,
+    exit: exitReplay,
+    seek: replaySeek,
+    step: replayStep,
+    playToggle: replayPlayToggle,
+  } = replay;
   const viewThreats = isReplaying ? [] : showThreats ? threats : [];
-
-  // リプレイ自動再生: 700ms ごとに1手進め、末尾で停止。
-  useEffect(() => {
-    if (!replayPlaying || replayIndex === null) return;
-    if (replayIndex >= moveHistory.length) {
-      setReplayPlaying(false);
-      return;
-    }
-    const t = window.setTimeout(() => {
-      setReplayIndex((i) => (i === null ? i : Math.min(moveHistory.length, i + 1)));
-    }, 700);
-    return () => window.clearTimeout(t);
-  }, [replayPlaying, replayIndex, moveHistory.length]);
-
-  const enterReplay = useCallback(() => {
-    setReplayIndex(moveHistory.length); // 最終局面から開始
-    setReplayPlaying(false);
-  }, [moveHistory.length]);
-  const exitReplay = useCallback(() => {
-    setReplayIndex(null);
-    setReplayPlaying(false);
-  }, []);
-  const replaySeek = useCallback(
-    (i: number) => {
-      setReplayPlaying(false);
-      setReplayIndex(Math.max(0, Math.min(moveHistory.length, i)));
-    },
-    [moveHistory.length],
-  );
-  const replayStep = useCallback(
-    (delta: number) => {
-      setReplayPlaying(false);
-      setReplayIndex((i) =>
-        i === null ? i : Math.max(0, Math.min(moveHistory.length, i + delta)),
-      );
-    },
-    [moveHistory.length],
-  );
-  const replayPlayToggle = useCallback(() => {
-    if (replayPlaying) {
-      setReplayPlaying(false);
-      return;
-    }
-    // 末尾で再生を押したら先頭から再生し直す。
-    if (replayIndex !== null && replayIndex >= moveHistory.length) setReplayIndex(0);
-    setReplayPlaying(true);
-  }, [replayPlaying, replayIndex, moveHistory.length]);
 
   // ---- オンラインのセッションスコア（room で一元管理＝両クライアントで一致） ----
   // 旧: 各クライアントが winner からローカル集計 → 再接続/観測漏れでホストとゲストがズレた。
