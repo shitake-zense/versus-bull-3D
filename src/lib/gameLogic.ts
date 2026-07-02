@@ -47,7 +47,7 @@ export interface BoardGeometry {
   winLines: number[][];
 }
 
-function buildGeometry(id: BoardShapeId): BoardGeometry {
+function computeGeometry(id: BoardShapeId): BoardGeometry {
   const spec = SHAPE_SPECS[id];
   const { dim } = spec;
   const cellCount = dim * dim;
@@ -60,6 +60,13 @@ function buildGeometry(id: BoardShapeId): BoardGeometry {
     else holes.add(i);
   }
   return { id, dim, cellCount, active, holes, winLines: buildWinLines(dim, holes) };
+}
+
+// 全4形状のジオメトリは不変なので初回計算をキャッシュし、再計算（winLines 列挙含む）を避ける。
+// initialPieces() の毎レンダー呼び出しや setBoardShape の切替でもキャッシュを共有する。
+const geometryCache: Partial<Record<BoardShapeId, BoardGeometry>> = {};
+function buildGeometry(id: BoardShapeId): BoardGeometry {
+  return (geometryCache[id] ??= computeGeometry(id));
 }
 
 /** 行・列・両対角に沿う長さ4の窓のうち、穴を含まないものだけを列挙（AI ヒューリスティック用）。 */

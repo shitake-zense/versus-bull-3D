@@ -47,6 +47,10 @@ import type { BoardShapeId, Player, RoomData, Seat, TimeControl, TurnPref, Winne
 
 const COUNTDOWN_MS = 3000;
 
+// fire-and-forget の書き込み（対局中の update/set/トランザクション）失敗を握りつぶさず
+// console にだけ出す。UI（トースト等）は出さない＝挙動は不変（対局中に表示面が無いため）。
+const warnWrite = (e: unknown) => console.warn('[vsb3] room write failed:', e);
+
 function makeUid(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
@@ -186,11 +190,11 @@ export function useFirebaseRoom(
     const unsub = onValue(connectedRef, (snap) => {
       if (snap.val() !== true) return; // 切断中。再接続時に再びここへ来る。
       // 切断時に connected=false（スロット自体は残し再接続/再戦を可能に）。
-      void onDisconnect(slotConnRef).set(false);
-      void set(slotConnRef, true);
+      onDisconnect(slotConnRef).set(false).catch(warnWrite);
+      set(slotConnRef, true).catch(warnWrite);
     });
     return () => unsub();
-  }, [roomId, myRole]);
+  }, [roomId, mySeat]);
 
   const createRoom = useCallback(
     async (
@@ -272,7 +276,7 @@ export function useFirebaseRoom(
       const startTeam = resolveStartingPlayer(cur.turnPref);
       // 予告抽選が正しい形状のセル上で行われるよう、ここでもジオメトリを確定。
       setBoardShape(cur.boardShape ?? 'square');
-      void update(dbRoom(), {
+      update(dbRoom(), {
         status: 'playing',
         turnStartedAt: serverTimestamp(),
         currentTurn: startTeam,
@@ -282,7 +286,7 @@ export function useFirebaseRoom(
         // 開始時に両チームの持ち時間を確定（ロビーで設定変更されていても整合させる）。
         'players/o/timeRemaining': tc.baseMs,
         'players/x/timeRemaining': tc.baseMs,
-      });
+      }).catch(warnWrite);
     }, COUNTDOWN_MS);
     return () => clearTimeout(t);
   }, [roomId, room, myRole, dbRoom]);
@@ -294,7 +298,7 @@ export function useFirebaseRoom(
     // 必要な席（1vs1=2 / 2vs2=4）が全部埋まるまで開始不可。
     if (requiredSeats(cur.teamMode).some((s) => !cur.players[s])) return;
     if (cur.status !== 'waiting') return;
-    void update(dbRoom(), { status: 'countdown' });
+    update(dbRoom(), { status: 'countdown' }).catch(warnWrite);
   }, [roomId, dbRoom]);
 
   // ルーム設定（持ち時間・先手・落下数・盤形状）を更新。ホストのみ・待機中だけ許可。
@@ -316,7 +320,7 @@ export function useFirebaseRoom(
       // 待機中の両者の表示用持ち時間も即時反映。
       if (cur.players.o) updates['players/o/timeRemaining'] = tc.baseMs;
       if (cur.players.x) updates['players/x/timeRemaining'] = tc.baseMs;
-      void update(dbRoom(), updates);
+      update(dbRoom(), updates).catch(warnWrite);
     },
     [roomId, dbRoom],
   );
@@ -329,7 +333,7 @@ export function useFirebaseRoom(
       const seat = mySeatRef.current;
       if (!roomId || !seat) return;
       const fallback = seat.toUpperCase();
-      void update(dbRoom(), { [`players/${seat}/name`]: name.trim() || fallback });
+      update(dbRoom(), { [`players/${seat}/name`]: name.trim() || fallback }).catch(warnWrite);
     },
     [roomId, dbRoom],
   );
@@ -384,7 +388,7 @@ export function useFirebaseRoom(
       if (winner === 'o' || winner === 'x') {
         updates[`score/${winner}`] = (cur.score?.[winner] ?? 0) + 1;
       }
-      void update(dbRoom(), updates);
+      update(dbRoom(), updates).catch(warnWrite);
     },
     [roomId, dbRoom],
   );
@@ -398,7 +402,7 @@ export function useFirebaseRoom(
     if (cur.currentTurn === role) return; // 自分の手番＝直前手はまだ無い
     if (!cur.lastMove || cur.lastMove.player !== role) return;
     if (cur.undo?.by) return; // 既に申請中
-    void update(dbRoom(), { undo: { by: role } });
+    update(dbRoom(), { undo: { by: role } }).catch(warnWrite);
   }, [roomId, dbRoom]);
 
   // 待った申請への応答。承認なら直前手を盤面から取り除き、手番を申請者へ戻す。
@@ -406,7 +410,7 @@ export function useFirebaseRoom(
     (accept: boolean) => {
       if (!roomId) return;
       const offset = offsetRef.current;
-      void runTransaction(dbRoom(), (data: RoomData | null) => {
+      runTransaction(dbRoom(), (data: RoomData | null) => {
         if (!data || !data.undo) return data;
         const lm = data.lastMove;
         if (accept && lm && data.status === 'playing') {
@@ -431,7 +435,7 @@ export function useFirebaseRoom(
         }
         data.undo = null;
         return data;
-      });
+      }).catch(warnWrite);
     },
     [roomId, dbRoom],
   );
@@ -439,7 +443,7 @@ export function useFirebaseRoom(
   const reportTimeout = useCallback(
     (player: Player) => {
       if (!roomId) return;
-      void runTransaction(dbRoom(), (data: RoomData | null) => {
+      runTransaction(dbRoom(), (data: RoomData | null) => {
         if (!data || data.winner || data.status === 'finished') return data;
         data.winner = player === 'o' ? 'timeout_o' : 'timeout_x';
         data.status = 'finished';
@@ -448,7 +452,7 @@ export function useFirebaseRoom(
         data.score = data.score || { o: 0, x: 0 };
         data.score[w] = (data.score[w] ?? 0) + 1;
         return data;
-      });
+      }).catch(warnWrite);
     },
     [roomId, dbRoom],
   );
@@ -456,7 +460,7 @@ export function useFirebaseRoom(
   const requestRematch = useCallback(() => {
     const role = myRoleRef.current;
     if (!roomId || !role) return;
-    void runTransaction(dbRoom(), (data: RoomData | null) => {
+    runTransaction(dbRoom(), (data: RoomData | null) => {
       if (!data) return data;
       const rematch = { ...(data.rematch || {}), [role]: true };
       data.rematch = rematch;
@@ -481,7 +485,7 @@ export function useFirebaseRoom(
         if (data.players.x) data.players.x.timeRemaining = tc.baseMs;
       }
       return data;
-    });
+    }).catch(warnWrite);
   }, [roomId, dbRoom]);
 
   // 設定を変えて再戦: ホストが終局後にロビー（waiting）へ戻す。盤面・勝敗・再戦希望・
@@ -489,7 +493,7 @@ export function useFirebaseRoom(
   const returnToLobby = useCallback(() => {
     if (myRoleRef.current !== 'o') return;
     if (!roomId) return;
-    void runTransaction(dbRoom(), (data: RoomData | null) => {
+    runTransaction(dbRoom(), (data: RoomData | null) => {
       if (!data || !data.winner) return data;
       const tc = normalizeTimeControl(data.timeControl);
       const pieces = initialPieces(data.boardShape ?? 'square');
@@ -504,7 +508,7 @@ export function useFirebaseRoom(
       if (data.players.o) data.players.o.timeRemaining = tc.baseMs;
       if (data.players.x) data.players.x.timeRemaining = tc.baseMs;
       return data;
-    });
+    }).catch(warnWrite);
   }, [roomId, dbRoom]);
 
   return {

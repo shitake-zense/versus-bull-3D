@@ -263,6 +263,10 @@ export default function App() {
   }, [isOnline, status, runCountdown]);
 
   // ---- 効果音＋直前着手の検知＋棋譜蓄積（盤面のピース増加で検知＝ローカル/リモート/AI 共通） ----
+  // 既知の限界（D8・容認済み）: オンラインでリロード/途中参加すると盤面が prevTotal=0 から
+  // 一括到着し、増えた駒を「セル番号順」で拾うため棋譜が実際の着手順にならない。その結果その
+  // クライアントのリプレイ表示（と縮小時の切り詰め整合）は崩れる。勝敗・盤面には影響しない。
+  // RoomData.moves のスキーマ拡張はしない方針なので、ここは仕様として容認する。
   // 全ピース数（中立ブロック含む）＝増減の検知用。プレイヤー駒のみの数＝棋譜整合用。
   const totalPieces = board.reduce((a, c) => a + c.length, 0);
   const playerPieces = board.reduce((a, c) => a + c.reduce((n, p) => n + (isBlock(p) ? 0 : 1), 0), 0);
