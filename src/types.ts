@@ -27,7 +27,7 @@ export type Seat = 'o' | 'x' | 'o2' | 'x2';
 /** 1マスのスタック。配列の先頭が最下層、末尾が最上層。プレイヤー駒＋中立ブロックを含む。 */
 export type Cell = StackPiece[];
 
-/** 盤面。length 16（4×4）。index = row * 4 + col。 */
+/** 盤面。length は boardCellCount()（形状依存の dim²。square=16）。index = row * dim + col。 */
 export type Board = Cell[];
 
 /** 1手の記録（リプレイ・棋譜用）。どのマスへどちらが置いたか。 */
@@ -71,7 +71,7 @@ export type Winner =
 
 /** 勝利を構成する1ピースの3D位置 */
 export interface WinCoord {
-  /** cellIndex（0-15） */
+  /** cellIndex（0 〜 boardCellCount()-1。square は 0-15） */
   cell: number;
   /** 高さ層（0 = 最下層） */
   layer: number;
