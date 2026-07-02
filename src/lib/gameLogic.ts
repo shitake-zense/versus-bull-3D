@@ -370,12 +370,11 @@ export function recordToBoard(rec: Record<string, StackPiece[]> | null | undefin
 export function boardFromMoves(moves: Move[], count: number, traps: readonly Trap[] = []): Board {
   let board = createEmptyBoard();
   const n = Math.max(0, Math.min(count, moves.length));
+  // リプレイでは盤面だけが必要。piecesLeft は無関係なので番兵（引き分け判定を起こさない）を渡す。
+  const noLimit: Record<Player, number> = { o: Infinity, x: Infinity };
   for (let i = 0; i < n; i++) {
     const { cell, player } = moves[i];
-    board = applyMove(board, cell, player);
-    if (!checkWinAt(board, cell, player) && triggeredTrap(board, cell, traps)) {
-      board = applyBlock(board, cell);
-    }
+    board = resolvePlacement(board, cell, player, traps, noLimit).board;
   }
   return board;
 }
