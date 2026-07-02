@@ -21,14 +21,11 @@ import {
   initialPieces,
   MAX_STACK,
   FIRST_PLAYER,
-  applyBlock,
-  applyMove,
-  checkWinAt,
   isBlock,
   pickTraps,
   recordToBoard,
+  resolvePlacement,
   setBoardShape,
-  triggeredTrap,
 } from '../lib/gameLogic';
 import {
   DEFAULT_TIME_CONTROL,
@@ -43,7 +40,7 @@ import {
   seatTeam,
   startingSeat,
 } from '../lib/seats';
-import type { BoardShapeId, Player, RoomData, Seat, TimeControl, TurnPref, Winner } from '../types';
+import type { BoardShapeId, Player, RoomData, Seat, TimeControl, TurnPref } from '../types';
 
 const COUNTDOWN_MS = 3000;
 
@@ -359,17 +356,15 @@ export function useFirebaseRoom(
         ? teamSlot.timeRemaining
         : teamSlot.timeRemaining - elapsed + tc.incrementMs;
 
-      let board = applyMove(recordToBoard(cur.board), cell, team);
-      const win = checkWinAt(board, cell, team);
-      // 勝利手でなければ、この着手で発動するトラップの中立ブロックを落とす。
-      if (!win && triggeredTrap(board, cell, cur.traps ?? [])) board = applyBlock(board, cell);
-      const piecesLeft = { ...cur.piecesLeft, [team]: cur.piecesLeft[team] - 1 };
-
-      // RTDB は null を書かないため、読み戻すと winner が undefined になる。
-      // update() は undefined を拒否するので null に正規化する。
-      let winner: Winner = cur.winner ?? null;
-      if (win) winner = team;
-      else if (piecesLeft.o <= 0 && piecesLeft.x <= 0) winner = 'draw';
+      // 着手解決（勝利判定・トラップ発動・引き分け）は resolvePlacement に集約。
+      // RTDB は null を書かないので、winner は下の update で ?? null に正規化して書く。
+      const { board, winner, piecesLeft } = resolvePlacement(
+        recordToBoard(cur.board),
+        cell,
+        team,
+        cur.traps ?? [],
+        cur.piecesLeft,
+      );
 
       const next = nextSeat(seat, cur.teamMode);
       const updates: Record<string, unknown> = {
