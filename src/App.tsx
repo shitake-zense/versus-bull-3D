@@ -393,18 +393,27 @@ export default function App() {
 
   // ---- アクション ----
   const startOfflineRound = useCallback(() => {
+    // 盤形状(GEO)をイベントハンドラ内で確定させてから盤面を作り直す。
+    // setBoardShape はレンダー時(下記)にも呼ぶが、形状選択の再レンダーがまだ
+    // フラッシュされていないタイミングで newRound が走ると、GEO が旧形状のまま
+    // 盤面が作られ、activeCells と board 長が食い違って Board3D がクラッシュ
+    // （真っ暗）する。ここで明示設定してレンダー順に依存しないようにする。
+    setBoardShape(boardShape);
     offline.newRound();
     setOfflineCountingDown(true);
     runCountdown(() => {
       setOfflineCountingDown(false);
       offline.start();
     });
-  }, [offline, runCountdown]);
+  }, [offline, runCountdown, boardShape]);
 
   const beginLocal = useCallback(() => {
     setMode('local');
     setRoomId(null);
-    requestAnimationFrame(startOfflineRound);
+    // newRound を同じ更新バッチで実行し、盤面を現在の形状(GEO)に合わせて作り直す。
+    // rAF で遅らせると mode='local' の初回描画が旧盤面(4×4)のまま走り、特殊形状で
+    // activeCells が board 長を超えて Board3D がクラッシュ（真っ暗）する。
+    startOfflineRound();
   }, [startOfflineRound]);
 
   // 手番希望を実プレイヤー（人間側）へ解決。random は毎回抽選。
@@ -419,7 +428,7 @@ export default function App() {
       setAiLevel(level);
       setMode('ai');
       setRoomId(null);
-      requestAnimationFrame(startOfflineRound);
+      startOfflineRound();
     },
     [startOfflineRound],
   );
@@ -431,7 +440,7 @@ export default function App() {
       setWatchLevelX(levelX);
       setMode('watch');
       setRoomId(null);
-      requestAnimationFrame(startOfflineRound);
+      startOfflineRound();
     },
     [startOfflineRound],
   );

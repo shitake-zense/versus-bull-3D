@@ -106,7 +106,7 @@ export function Board3D({
       })}
 
       {/* 仮置きピース（自分だけに見えるゴースト。確定前なので相手には未送信） */}
-      {canPlace && tentative !== null && (
+      {canPlace && tentative !== null && board[tentative] && (
         <Piece3D
           key={`ghost-${tentative}-${board[tentative].length}`}
           position={cellToXZ(tentative)}
@@ -128,7 +128,7 @@ export function Board3D({
         ))}
 
       {/* ホバープレビュー（白リング） */}
-      {canPlace && hovered !== null && (
+      {canPlace && hovered !== null && board[hovered] && (
         <mesh
           position={[cellToXZ(hovered)[0], layerY(board[hovered].length), cellToXZ(hovered)[1]]}
           rotation={[-Math.PI / 2, 0, 0]}
@@ -146,8 +146,13 @@ export function Board3D({
 
       {/* クリック判定用の透明プレーン（プレイ可能マスのみ） */}
       {activeCells.map((cell) => {
+        // 盤形状の切替直後など、board の長さが GEO(activeCells)に追従していない
+        // 過渡フレームでは board[cell] が undefined になり得る。その1フレームを
+        // クラッシュ（＝画面真っ暗）させず読み飛ばす。
+        const stack = board[cell];
+        if (!stack) return null;
         const [x, z] = cellToXZ(cell);
-        const disabled = board[cell].length >= MAX_STACK; // 満杯マスは着手不可
+        const disabled = stack.length >= MAX_STACK; // 満杯マスは着手不可
         return (
           <mesh
             key={`hit-${cell}`}
