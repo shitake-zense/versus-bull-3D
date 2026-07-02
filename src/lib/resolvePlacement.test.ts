@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { Board, Player, Trap, WinLine, Winner } from '../types';
+import { BLOCK } from '../types';
 import {
   applyBlock,
   applyMove,
@@ -91,5 +92,38 @@ describe('resolvePlacement は旧3実装（オラクル）と一致する', () =
     const before = JSON.stringify(b);
     resolvePlacement(b, 5, 'x', [], { o: 16, x: 16 });
     expect(JSON.stringify(b)).toBe(before);
+  });
+});
+
+describe('resolvePlacement のエッジケース', () => {
+  it('勝利手は残り駒が尽きても winner=player（引き分けに優先）', () => {
+    setBoardShape('square');
+    const b = createEmptyBoard();
+    b[0] = ['o'];
+    b[1] = ['o'];
+    b[2] = ['o']; // cell3 で横4連完成
+    // 着手で o の残り駒が 0 になり x も 0 でも、勝利が引き分けに優先する。
+    const r = resolvePlacement(b, 3, 'o', [], { o: 1, x: 0 });
+    expect(r.winner).toBe('o');
+    expect(r.winLine).not.toBeNull();
+  });
+
+  it('特殊形状（八角形）でも穴を通る4連は成立しない', () => {
+    // octagon: row0 の idx0/idx4 は穴。idx1,2,3 に o を置いても横4連にはならない。
+    setBoardShape('octagon');
+    const b = createEmptyBoard();
+    b[1] = ['o'];
+    b[2] = ['o'];
+    const r = resolvePlacement(b, 3, 'o', [], { o: 42, x: 42 });
+    expect(r.winLine).toBeNull();
+    expect(r.winner).toBeNull();
+  });
+
+  it('特殊形状（八角形）でトラップが発動する', () => {
+    setBoardShape('octagon');
+    const b = createEmptyBoard();
+    b[12] = ['o']; // 高さ1（idx12 は中央付近＝有効セル）
+    const r = resolvePlacement(b, 12, 'x', [{ cell: 12, layer: 2 }], { o: 42, x: 42 });
+    expect(r.board[12]).toEqual(['o', 'x', BLOCK]);
   });
 });
