@@ -22,6 +22,7 @@ import { useFirebaseRoom } from './hooks/useFirebaseRoom';
 import { useFisherClock } from './hooks/useFisherClock';
 import { useMoveHistory } from './hooks/useMoveHistory';
 import { useReplay } from './hooks/useReplay';
+import { useCountdown } from './hooks/useCountdown';
 import { useSound } from './hooks/useSound';
 import { useBgm } from './hooks/useBgm';
 import { Scene3D } from './components/Scene3D';
@@ -95,7 +96,7 @@ export default function App() {
       return next;
     });
   }, []);
-  const [countdown, setCountdown] = useState<number | null>(null);
+  const { countdown, runCountdown, cancel: cancelCountdown } = useCountdown(playCount);
   const [offlineCountingDown, setOfflineCountingDown] = useState(false);
 
   const offline = useGameLogic({
@@ -227,36 +228,14 @@ export default function App() {
     onTimeout,
   });
 
-  // ---- カウントダウン演出 ----
-  const cdTimer = useRef<number | undefined>(undefined);
-  const runCountdown = useCallback(
-    (onDone?: () => void) => {
-      window.clearInterval(cdTimer.current);
-      let n = 3;
-      setCountdown(3);
-      playCount(false);
-      cdTimer.current = window.setInterval(() => {
-        n -= 1;
-        if (n <= 0) {
-          window.clearInterval(cdTimer.current);
-          setCountdown(null);
-          onDone?.();
-        } else {
-          setCountdown(n);
-          playCount(n === 1);
-        }
-      }, 1000);
-    },
-    [playCount],
-  );
-
+  // ---- カウントダウン演出（useCountdown フックが state/タイマーを管理） ----
   // オンライン: status が countdown の間だけ表示用カウントダウン（開始は host が確定）
   useEffect(() => {
     if (isOnline && status === 'countdown') {
       runCountdown();
-      return () => window.clearInterval(cdTimer.current);
+      return () => cancelCountdown();
     }
-  }, [isOnline, status, runCountdown]);
+  }, [isOnline, status, runCountdown, cancelCountdown]);
 
   // ---- 効果音＋直前着手の検知＋棋譜蓄積（盤面のピース増加で検知＝ローカル/リモート/AI 共通） ----
   // 盤面リセット時にリプレイ状態を消すが、リプレイフックは棋譜を必要とするため後で定義される。
@@ -378,8 +357,7 @@ export default function App() {
   }, []);
 
   const exitToMenu = useCallback(() => {
-    window.clearInterval(cdTimer.current);
-    setCountdown(null);
+    cancelCountdown();
     setOfflineCountingDown(false);
     setMode(null);
     setRoomId(null);
@@ -387,7 +365,7 @@ export default function App() {
     setIsGuest(false);
     offline.reset();
     window.history.replaceState(null, '', window.location.pathname);
-  }, [offline]);
+  }, [offline, cancelCountdown]);
 
   const handleRematch = useCallback(() => {
     if (isOnline) {
