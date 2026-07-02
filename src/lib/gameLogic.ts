@@ -1,7 +1,7 @@
 // vsb3 純粋ゲームロジック
 // 盤面は副作用なしのイミュータブル操作で扱う。UI / AI / Firebase 同期の全てがこれを基準にする。
 
-import type { Board, BoardShapeId, Cell, Move, Player, StackPiece, Trap, WinLine } from '../types';
+import type { Board, BoardShapeId, Cell, Move, Player, StackPiece, Trap, WinLine, Winner } from '../types';
 import { BLOCK } from '../types';
 
 export const MAX_STACK = 10; // 1マスに積める最大段数（これ以上は着手不可）
@@ -310,6 +310,44 @@ function lineFrom(
     coords.push({ cell: rr * dim + cc, layer: ll });
   }
   return { coords, player };
+}
+
+/** 着手を1手解決した結果（盤面・勝ちライン・勝者・残り駒）。 */
+export interface Placement {
+  /** 着手（＋発動すれば落下ブロック）まで適用した新しい盤面。 */
+  board: Board;
+  /** 勝利ライン（勝ち手でなければ null）。 */
+  winLine: WinLine | null;
+  /** 勝者 / 'draw' / まだ決まらないなら null。 */
+  winner: Winner;
+  /** 着手側を1減らした残り駒。 */
+  piecesLeft: Record<Player, number>;
+}
+
+/**
+ * 1手の着手を解決する唯一の純関数。ローカル(useGameLogic)・オンライン(useFirebaseRoom)・
+ * リプレイ(boardFromMoves) の3経路が共有し、「着手→勝利判定→（勝ち手でなければ）トラップ発動
+ * →残り駒減算→引き分け判定」の規則を1か所に閉じ込める。
+ * - 勝利手ではトラップを発動させない（実戦の place と同一）。
+ * - 着手後に両者の残り駒が尽きたら 'draw'。
+ * 呼び出し側の責務: 満杯/手番ガード・タイマー計算・Firebase update 組み立て・履歴 push。
+ * （探索用の applyMoveWithTrap は勝ち手でもブロックを積む別用途なので統合しない。）
+ */
+export function resolvePlacement(
+  board: Board,
+  cell: number,
+  player: Player,
+  traps: readonly Trap[],
+  piecesLeft: Record<Player, number>,
+): Placement {
+  let next = applyMove(board, cell, player);
+  const winLine = checkWinAt(next, cell, player);
+  if (!winLine && triggeredTrap(next, cell, traps)) next = applyBlock(next, cell);
+  const left = { ...piecesLeft, [player]: piecesLeft[player] - 1 };
+  let winner: Winner = null;
+  if (winLine) winner = player;
+  else if (left.o <= 0 && left.x <= 0) winner = 'draw';
+  return { board: next, winLine, winner, piecesLeft: left };
 }
 
 // ---- Firebase の board(Record<string,StackPiece[]>) → Board(配列) への変換 ----
