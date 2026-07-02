@@ -19,7 +19,6 @@ const PRESETS: Record<CameraView, Vector3> = {
   3: new Vector3(8.2, 2.2, 0.5), // ドラマチック（水平寄り）
 };
 
-export const DEFAULT_VIEW: CameraView = 2;
 const ANIM_MS = 600;
 // 追従カメラの軌道半径・高さ（プリセット2と同等の仰角）。
 const FOLLOW_R = 7.4;

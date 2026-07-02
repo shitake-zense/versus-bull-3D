@@ -84,15 +84,6 @@ export interface WinLine {
   player: Player;
 }
 
-/** 純粋なゲーム状態（描画・ロジック共通のスナップショット） */
-export interface GameState {
-  board: Board;
-  currentTurn: Player;
-  piecesLeft: Record<Player, number>;
-  winner: Winner;
-  winLine: WinLine | null;
-}
-
 /** Firebase /rooms/{roomId} のスキーマ */
 export interface RoomData {
   status: RoomStatus;

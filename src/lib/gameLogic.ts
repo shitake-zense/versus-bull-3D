@@ -5,8 +5,6 @@ import type { Board, BoardShapeId, Cell, Move, Player, StackPiece, Trap, WinLine
 import { BLOCK } from '../types';
 
 export const MAX_STACK = 10; // 1マスに積める最大段数（これ以上は着手不可）
-export const START_TIME_MS = 300_000; // 初期持ち時間 5分
-export const INCREMENT_MS = 15_000; // フィッシャー加算 +15秒
 export const FIRST_PLAYER: Player = 'o';
 export const WIN_LEN = 4;
 
@@ -158,10 +156,6 @@ export function cloneBoard(board: Board): Board {
 
 export const oppositeOf = (p: Player): Player => (p === 'o' ? 'x' : 'o');
 
-export function rowCol(cellIndex: number): [number, number] {
-  return [Math.floor(cellIndex / GEO.dim), cellIndex % GEO.dim];
-}
-
 /** そのマスが満杯（MAX_STACK 到達）で、これ以上積めないか。 */
 export function isCellFull(board: Board, cellIndex: number): boolean {
   return board[cellIndex].length >= MAX_STACK;
@@ -180,7 +174,7 @@ export function legalMoves(board: Board, piecesLeftForPlayer: number): number[] 
   if (piecesLeftForPlayer <= 0) return [];
   const moves: number[] = [];
   for (const i of GEO.active) {
-    if (board[i].length >= MAX_STACK) continue;
+    if (isCellFull(board, i)) continue;
     moves.push(i);
   }
   return moves;
@@ -311,19 +305,7 @@ function lineFrom(
   return { coords, player };
 }
 
-export function isBoardFull(piecesLeft: Record<Player, number>): boolean {
-  return piecesLeft.o <= 0 && piecesLeft.x <= 0;
-}
-
-// ---- Firebase の board(Record<string,Player[]>) と Board(配列) の相互変換 ----
-
-export function boardToRecord(board: Board): Record<string, StackPiece[]> {
-  const rec: Record<string, StackPiece[]> = {};
-  board.forEach((cell, i) => {
-    if (cell.length > 0) rec[String(i)] = cell;
-  });
-  return rec;
-}
+// ---- Firebase の board(Record<string,StackPiece[]>) → Board(配列) への変換 ----
 
 export function recordToBoard(rec: Record<string, StackPiece[]> | null | undefined): Board {
   const board = createEmptyBoard();

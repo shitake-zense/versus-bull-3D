@@ -8,9 +8,6 @@ export const TEAM: Record<Player, { name: string; tag: string; reading: string }
   x: { name: 'XENOGENESIS', tag: 'X', reading: 'ゼノジェネシス' },
 };
 
-export const teamName = (p: Player): string => TEAM[p].name;
-export const teamTag = (p: Player): string => TEAM[p].tag;
-
 /** AI 難易度の表示ラベル（UI / CPU名の表記に共用）。 */
 export const AI_LEVEL_LABEL: Record<AiLevel, string> = {
   easy: 'やさしい',

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AiLevel, BoardShapeId, GameMode, Move, Player, Seat, TimeControl, TurnPref } from './types';
 import {
-  MAX_STACK,
+  isCellFull,
   applyMove,
   boardFromMoves,
   checkWinAt,
@@ -189,7 +189,7 @@ export default function App() {
     const res: { cell: number; layer: number }[] = [];
     for (let c = 0; c < board.length; c++) {
       if (!isActiveCell(c)) continue; // 穴（プレイ不可）は脅威にならない
-      if (board[c].length >= MAX_STACK) continue; // 満杯マスは着地不可＝脅威にならない
+      if (isCellFull(board, c)) continue; // 満杯マスは着地不可＝脅威にならない
       const next = applyMove(board, c, opp);
       if (checkWinAt(next, c, opp)) res.push({ cell: c, layer: board[c].length });
     }

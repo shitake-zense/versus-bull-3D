@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AiLevel, GameMode, Player, TimeControl, Trap, Winner, WinLine, Board } from '../types';
 import {
   initialPieces,
-  MAX_STACK,
+  isCellFull,
   FIRST_PLAYER,
   applyBlock,
   applyMove,
@@ -128,7 +128,7 @@ export function useGameLogic({
       if (prev.winner || !running) return;
       const player = prev.currentTurn;
       if (prev.piecesLeft[player] <= 0) return;
-      if (prev.board[cell].length >= MAX_STACK) return; // 満杯マスには置けない
+      if (isCellFull(prev.board, cell)) return; // 満杯マスには置けない
 
       const now = Date.now();
       const elapsed = now - prev.turnStartedAt;
