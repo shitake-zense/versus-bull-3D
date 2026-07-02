@@ -1,7 +1,7 @@
 // 画面遷移と各モードの統合。menu ↔ game を切り替え、ローカル/AI と オンライン の状態源を束ねる。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { AiLevel, BoardShapeId, GameMode, Move, Player, Seat, TimeControl, TurnPref } from './types';
+import type { AiLevel, BoardShapeId, GameMode, Player, Seat, TimeControl, TurnPref } from './types';
 import {
   isCellFull,
   applyMove,
@@ -9,7 +9,6 @@ import {
   checkWinAt,
   initialPieces,
   isActiveCell,
-  isBlock,
   oppositeOf,
   recordToBoard,
   scanWin,
@@ -22,6 +21,7 @@ import { AI_LEVEL_LABEL, TEAM } from './lib/teams';
 import { useGameLogic } from './hooks/useGameLogic';
 import { useFirebaseRoom } from './hooks/useFirebaseRoom';
 import { useFisherClock } from './hooks/useFisherClock';
+import { useMoveHistory } from './hooks/useMoveHistory';
 import { useSound } from './hooks/useSound';
 import { useBgm } from './hooks/useBgm';
 import { Scene3D } from './components/Scene3D';
@@ -263,51 +263,11 @@ export default function App() {
   }, [isOnline, status, runCountdown]);
 
   // ---- 効果音＋直前着手の検知＋棋譜蓄積（盤面のピース増加で検知＝ローカル/リモート/AI 共通） ----
-  // 既知の限界（D8・容認済み）: オンラインでリロード/途中参加すると盤面が prevTotal=0 から
-  // 一括到着し、増えた駒を「セル番号順」で拾うため棋譜が実際の着手順にならない。その結果その
-  // クライアントのリプレイ表示（と縮小時の切り詰め整合）は崩れる。勝敗・盤面には影響しない。
-  // RoomData.moves のスキーマ拡張はしない方針なので、ここは仕様として容認する。
-  // 全ピース数（中立ブロック含む）＝増減の検知用。プレイヤー駒のみの数＝棋譜整合用。
-  const totalPieces = board.reduce((a, c) => a + c.length, 0);
-  const playerPieces = board.reduce((a, c) => a + c.reduce((n, p) => n + (isBlock(p) ? 0 : 1), 0), 0);
-  const prevTotal = useRef(0);
-  const prevBoard = useRef<typeof board>(board);
-  const [lastMove, setLastMove] = useState<{ cell: number; layer: number } | null>(null);
-  const [moveHistory, setMoveHistory] = useState<Move[]>([]);
-  useEffect(() => {
-    const prev = prevBoard.current;
-    if (totalPieces > prevTotal.current) {
-      playPlace();
-      // 増えたピースを着手順（下→上）に拾い、直前手の強調と棋譜へ反映する。
-      // 中立ブロック（落下ブロック）は着手ではないので棋譜には入れない。
-      const added: { cell: number; player: Player; layer: number }[] = [];
-      for (let c = 0; c < board.length; c++) {
-        const prevLen = prev[c]?.length ?? 0;
-        for (let l = prevLen; l < board[c].length; l++) {
-          const p = board[c][l];
-          if (!isBlock(p)) added.push({ cell: c, player: p, layer: l });
-        }
-      }
-      if (added.length > 0) {
-        const last = added[added.length - 1];
-        setLastMove({ cell: last.cell, layer: last.layer });
-        setMoveHistory((h) => [...h, ...added.map((a) => ({ cell: a.cell, player: a.player }))]);
-      }
-    } else if (totalPieces < prevTotal.current) {
-      setLastMove(null);
-      if (totalPieces === 0) {
-        // 新規対局・再戦などで盤面がリセットされたら棋譜・リプレイを消す。
-        setMoveHistory([]);
-        setReplayIndex(null);
-        setReplayPlaying(false);
-      } else {
-        // 待った（手戻し）: 棋譜はプレイヤー駒の残り手数まで切り詰める（プレフィックスなので安全）。
-        setMoveHistory((h) => h.slice(0, playerPieces));
-      }
-    }
-    prevTotal.current = totalPieces;
-    prevBoard.current = board;
-  }, [totalPieces, playerPieces, board, playPlace]);
+  const { lastMove, moveHistory } = useMoveHistory(board, playPlace, () => {
+    // 盤面が空にリセットされたら（新規対局・再戦）リプレイ表示を消す。
+    setReplayIndex(null);
+    setReplayPlaying(false);
+  });
 
   useEffect(() => {
     if (winner === 'o' || winner === 'x') playWin();
