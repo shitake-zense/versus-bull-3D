@@ -7,13 +7,10 @@ import {
   initialPieces,
   isCellFull,
   FIRST_PLAYER,
-  applyBlock,
-  applyMove,
-  checkWinAt,
   createEmptyBoard,
   oppositeOf,
   pickTraps,
-  triggeredTrap,
+  resolvePlacement,
 } from '../lib/gameLogic';
 import { DEFAULT_TIME_CONTROL, isUnlimited } from '../lib/timeControl';
 import { getBestMove } from '../lib/ai';
@@ -137,20 +134,14 @@ export function useGameLogic({
         ? prev.remaining[player]
         : prev.remaining[player] - elapsed + tc.incrementMs;
 
-      let board = applyMove(prev.board, cell, player);
-      const win = checkWinAt(board, cell, player);
-      // 勝利手でなければ、この着手で発動するトラップの中立ブロックを落とす。
-      if (!win && triggeredTrap(board, cell, prev.traps)) board = applyBlock(board, cell);
-      const piecesLeft = { ...prev.piecesLeft, [player]: prev.piecesLeft[player] - 1 };
-
-      let winner: Winner = null;
-      let winLine: WinLine | null = null;
-      if (win) {
-        winner = player;
-        winLine = win;
-      } else if (piecesLeft.o <= 0 && piecesLeft.x <= 0) {
-        winner = 'draw';
-      }
+      // 着手解決（勝利判定・トラップ発動・引き分け）は resolvePlacement に集約。
+      const { board, winLine, winner, piecesLeft } = resolvePlacement(
+        prev.board,
+        cell,
+        player,
+        prev.traps,
+        prev.piecesLeft,
+      );
 
       setHistory((h) => [...h, prev]); // 着手前の状態を保存（待った用）
       setS({
