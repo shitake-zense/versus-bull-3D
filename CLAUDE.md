@@ -15,9 +15,10 @@ npm run dev        # Vite dev server (reads .env). URL has base: http://localhos
 npm run build      # tsc -b && vite build  (always run before claiming a change compiles)
 npm run typecheck  # tsc -b --noEmit
 npm run preview    # serve the production build locally
+npm test           # vitest run — pure-logic unit tests in src/lib/*.test.ts
 ```
 
-There is **no test framework and no linter**. To sanity-check pure logic (e.g. the AI or `gameLogic`), bundle a throwaway script with esbuild (a transitive dep) and run it with node — bundling is required because source imports are extensionless:
+Tests use **vitest** (config: `vitest.config.ts`, node env, `src/lib/**/*.test.ts` only — it intentionally does not touch `vite.config.ts`). There is **no linter**. Test files import globals explicitly (`import { describe, it, expect } from 'vitest'`) so they typecheck under the normal `tsc -b` build. To sanity-check pure logic ad-hoc without adding a test, bundle a throwaway script with esbuild (a transitive dep) and run it with node — bundling is required because source imports are extensionless:
 
 ```bash
 npx esbuild scratch.ts --bundle --platform=node --format=esm --outfile=scratch.mjs && node scratch.mjs
